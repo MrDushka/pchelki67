@@ -2,7 +2,7 @@
 
 Веб-игра с боями пчёлок.
 
-**Играть:** https://stealadushka.github.io/pchelki67/
+**Играть:** https://mrdushka.github.io/pchelki67/
 
 ## Аккаунты
 Регистрация как в Steal a Dushka 2: ник + пароль, без почты.
