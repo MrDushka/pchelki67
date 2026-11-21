@@ -768,6 +768,287 @@
     }
   }
 
+  // ---------- животные ----------
+  // Животные стоят по сетке 320 px. Где именно и куда бегут, считается от времени (Date.now),
+  // поэтому у всех игроков звери в тех же местах. Если пчёлка подлетит близко, звери отбегают.
+  const ACELL = 280;
+  const ASCALE = { butterfly: 1.5, moth: 1.6, firefly: 1.3, parrot: 1.6, snail: 1.7, crab: 1.7, frog: 1.8, hedgehog: 1.8, fish: 1.6, lizard: 1.7, salamander: 1.8 };
+  // тип: [поведение, радиус прогулки, скорость]
+  const KINDS = {
+    butterfly: ["fly", 90, 0.5], parrot: ["fly", 170, 0.35], firefly: ["fly", 50, 0.3], moth: ["fly", 90, 0.45],
+    rabbit: ["hop", 120, 1.1], frog: ["hop", 70, 0.8],
+    deer: ["walk", 150, 0.06], fox: ["walk", 160, 0.09], hedgehog: ["walk", 60, 0.07], snail: ["walk", 25, 0.03],
+    goat: ["walk", 90, 0.06], penguin: ["walk", 80, 0.08], lizard: ["walk", 90, 0.12], salamander: ["walk", 80, 0.1],
+    crab: ["walk", 70, 0.1], duck: ["swim", 100, 0.06], fish: ["swim", 80, 0.05],
+  };
+  const FAUNA = {
+    [B.MEADOW]: [["rabbit", 3], ["butterfly", 3], ["hedgehog", 1]],
+    [B.FLOWERS]: [["butterfly", 5], ["rabbit", 1]],
+    [B.FOREST]: [["deer", 2], ["fox", 1], ["hedgehog", 1], ["snail", 1]],
+    [B.SAKURA]: [["butterfly", 2], ["fox", 1], ["rabbit", 1]],
+    [B.GOLDEN]: [["rabbit", 2], ["butterfly", 1]],
+    [B.SAND]: [["crab", 1]],
+    [B.SHALLOW]: [["duck", 2], ["fish", 1], ["frog", 1]],
+    [B.DEEP]: [["fish", 3], ["duck", 1]],
+    [B.ROCK]: [["goat", 2], ["lizard", 1]],
+    [B.SNOW]: [["penguin", 2], ["rabbit", 1]],
+    [B.LAVENDER]: [["butterfly", 4], ["rabbit", 1]],
+    [B.AUTUMN]: [["fox", 2], ["hedgehog", 2], ["deer", 1]],
+    [B.SWAMP]: [["frog", 4], ["firefly", 1], ["duck", 1]],
+    [B.MUSHROOM]: [["firefly", 3], ["snail", 2]],
+    [B.DESERT]: [["lizard", 1]],
+    [B.JUNGLE]: [["parrot", 3], ["frog", 1], ["butterfly", 1]],
+    [B.ICE]: [["penguin", 1]],
+    [B.VOLCANO]: [["salamander", 1]],
+    [B.CRYSTAL]: [["moth", 1]],
+  };
+  const BUTTERFLY_COLS = ["#ff9ec7", "#ffd84d", "#7fb8ff", "#b58cf0", "#ff8a5c", "#fff6ec"];
+  const acache = new Map();
+
+  function animalAt(ax, ay) {
+    const key = ax + "," + ay;
+    if (acache.has(key)) return acache.get(key);
+    let a = null;
+    if (hash(ax, ay, 91) < 0.5) {
+      const hx = ax * ACELL + 70 + hash(ax, ay, 92) * (ACELL - 140);
+      const hy = ay * ACELL + 70 + hash(ax, ay, 93) * (ACELL - 140);
+      const b = biome(hx, hy).b, list = FAUNA[b];
+      if (list && Math.hypot(hx - HX, hy - HY) > 360) {
+        let total = 0; for (const [, w] of list) total += w;
+        let r = hash(ax, ay, 94) * total, kind = list[0][0];
+        for (const [k, w] of list) { if ((r -= w) < 0) { kind = k; break; } }
+        const R = KINDS[kind][1];
+        // зверь не должен выходить за свою местность (рыба на сушу и т.п.)
+        let ok = true;
+        if (KINDS[kind][0] !== "fly") for (const [dx, dy] of [[R, 0], [-R, 0], [0, R * 0.7], [0, -R * 0.7]]) if (biome(hx + dx, hy + dy).b !== b) ok = false;
+        if (ok) a = {
+          key, kind, hx, hy, R, b,
+          p: [0, 1, 2, 3, 4].map((i) => hash(ax, ay, 95 + i) * 6.283),
+          col: BUTTERFLY_COLS[(hash(ax, ay, 100) * 6) | 0],
+          ox: 0, oy: 0,
+        };
+      }
+    }
+    if (acache.size > 4000) acache.clear();
+    acache.set(key, a);
+    return a;
+  }
+
+  // путь прогулки: сумма синусов, плавная петля вокруг дома
+  function pathPos(a, tt) {
+    const p = a.p, R = a.R;
+    return [
+      a.hx + R * (0.65 * Math.sin(tt + p[0]) + 0.35 * Math.sin(tt * 2.3 + p[1])),
+      a.hy + R * 0.7 * (0.65 * Math.cos(tt * 0.9 + p[2]) + 0.35 * Math.sin(tt * 1.7 + p[3])),
+    ];
+  }
+  // где зверь сейчас: [x, y, направление по x, подскок, фаза]
+  function animalPos(a, t) {
+    const [mode, , spd] = KINDS[a.kind];
+    if (mode === "hop") {
+      const k = t * spd + a.p[4], fr = k - Math.floor(k);
+      const move = Math.min(1, fr / 0.45), ease = move * move * (3 - 2 * move);
+      const tt = (Math.floor(k) + ease) * 0.45;
+      const [x, y] = pathPos(a, tt), [x2] = pathPos(a, tt + 0.05);
+      return [x, y, x2 - x, fr < 0.45 ? Math.sin((fr / 0.45) * Math.PI) * (a.kind === "frog" ? 7 : 10) : 0, fr];
+    }
+    const tt = t * spd * (mode === "fly" ? 1 : 6);
+    const [x, y] = pathPos(a, tt), [x2] = pathPos(a, tt + 0.02);
+    return [x, y, x2 - x, 0, tt];
+  }
+
+  // ----- рисунки зверей (смотрят вправо, (0,0) — точка на земле) -----
+  function legs(n, x0, dx, y0, len, walk, col) {
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineCap = "round";
+    for (let i = 0; i < n; i++) {
+      const sw = Math.sin(walk * 12 + i * Math.PI) * 3;
+      ctx.beginPath(); ctx.moveTo(x0 + i * dx, y0); ctx.lineTo(x0 + i * dx + sw, y0 + len); ctx.stroke();
+    }
+  }
+  function eye(x, y, r = 1.6) { ctx.fillStyle = "#1d140a"; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill(); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x + r * 0.35, y - r * 0.35, r * 0.4, 0, 6.283); ctx.fill(); }
+  const ANIMAL_DRAW = {
+    butterfly(a, t, ph, glow) {
+      const f = Math.abs(Math.sin(t * 14 + a.p[0]));
+      const c = glow ? "#8ff3ff" : a.col;
+      if (glow) { const g = ctx.createRadialGradient(0, -18, 0, 0, -18, 22); g.addColorStop(0, "rgba(140,240,255,0.45)"); g.addColorStop(1, "rgba(140,240,255,0)"); ctx.fillStyle = g; ctx.fillRect(-22, -40, 44, 44); }
+      ctx.fillStyle = c;
+      ctx.beginPath(); ctx.ellipse(-4 * f, -20, 6 * f + 1, 7, -0.3, 0, 6.283); ctx.ellipse(4 * f, -20, 6 * f + 1, 7, 0.3, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-3 * f, -13, 4 * f + 1, 4.5, 0.3, 0, 6.283); ctx.ellipse(3 * f, -13, 4 * f + 1, 4.5, -0.3, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#2b1d0e"; ctx.fillRect(-1, -24, 2, 13);
+    },
+    moth(a, t, ph) { ANIMAL_DRAW.butterfly(a, t, ph, true); },
+    parrot(a, t) {
+      const f = Math.sin(t * 12 + a.p[0]);
+      ctx.fillStyle = "#e8483f"; ctx.beginPath(); ctx.ellipse(0, -26, 10, 6, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(9, -29, 5, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#ffcf3a"; ctx.beginPath(); ctx.moveTo(13, -30); ctx.lineTo(18, -28); ctx.lineTo(13, -26); ctx.fill();
+      ctx.fillStyle = "#3d8bff"; ctx.beginPath(); ctx.moveTo(-10, -26); ctx.lineTo(-20, -24); ctx.lineTo(-10, -23); ctx.fill();
+      ctx.fillStyle = "#2fb05a"; ctx.beginPath(); ctx.ellipse(-1, -26 - f * 7, 9, 4, -0.2, 0, 6.283); ctx.fill();
+      eye(10, -30, 1.3);
+    },
+    firefly(a, t) {
+      for (let i = 0; i < 5; i++) {
+        const x = Math.sin(t * 1.3 + i * 2.1 + a.p[i]) * 22, y = -20 + Math.cos(t * 1.1 + i * 1.7) * 14;
+        const on = 0.5 + 0.5 * Math.sin(t * 3 + i * 1.9);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, 9); g.addColorStop(0, `rgba(210,255,120,${0.8 * on})`); g.addColorStop(1, "rgba(210,255,120,0)");
+        ctx.fillStyle = g; ctx.fillRect(x - 9, y - 9, 18, 18);
+        ctx.fillStyle = `rgba(250,255,200,${0.6 + 0.4 * on})`; ctx.beginPath(); ctx.arc(x, y, 1.8, 0, 6.283); ctx.fill();
+      }
+    },
+    rabbit(a, t, ph) {
+      const white = a.b === B.SNOW;
+      const c = white ? "#f7f9fc" : "#c9a27a", c2 = white ? "#e4e9f0" : "#b08a63";
+      ctx.fillStyle = c2; ctx.beginPath(); ctx.ellipse(7, -21, 2.2, 7, 0.2, 0, 6.283); ctx.ellipse(10, -20, 2.2, 7, 0.5, 0, 6.283); ctx.fill();
+      ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(-1, -7, 9, 7, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(8, -11, 5, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(-10, -8, 3, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#ff9ec7"; ctx.beginPath(); ctx.arc(12.5, -10, 1.2, 0, 6.283); ctx.fill();
+      eye(10, -12, 1.3);
+    },
+    frog(a) {
+      ctx.fillStyle = "#4caf50"; ctx.beginPath(); ctx.ellipse(0, -5, 9, 6, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#3d9142"; ctx.beginPath(); ctx.ellipse(-7, -1, 5, 2.5, 0.3, 0, 6.283); ctx.ellipse(6, -1, 4, 2.5, -0.3, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#6fd36b"; ctx.beginPath(); ctx.arc(4, -10, 3.2, 0, 6.283); ctx.arc(9, -9, 3.2, 0, 6.283); ctx.fill();
+      eye(4.5, -10, 1.4); eye(9.5, -9, 1.4);
+    },
+    deer(a, t, ph) {
+      legs(2, -8, 4, -10, 11, ph, "#8a5a35"); legs(2, 6, 4, -10, 11, ph + 0.5, "#8a5a35");
+      ctx.fillStyle = "#b57a46"; ctx.beginPath(); ctx.ellipse(0, -15, 14, 7, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(9, -18); ctx.lineTo(15, -28); ctx.lineTo(19, -26); ctx.lineTo(14, -15); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(19, -29, 5, 3.5, 0.3, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = "#7a4f2a"; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(17, -32); ctx.lineTo(15, -39); ctx.moveTo(16, -36); ctx.lineTo(12, -38); ctx.moveTo(19, -32); ctx.lineTo(21, -39); ctx.stroke();
+      ctx.fillStyle = "#fff4e6"; for (const [x, y] of [[-6, -17], [-1, -19], [4, -17], [-3, -14]]) { ctx.beginPath(); ctx.arc(x, y, 1.2, 0, 6.283); ctx.fill(); }
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(-14, -16, 3, 2, 0, 0, 6.283); ctx.fill();
+      eye(20, -30, 1.2);
+    },
+    fox(a, t, ph) {
+      legs(2, -7, 4, -7, 8, ph, "#3a2418"); legs(2, 5, 4, -7, 8, ph + 0.5, "#3a2418");
+      ctx.fillStyle = "#e8762e"; ctx.beginPath(); ctx.ellipse(-16, -12, 9, 4.5, -0.4, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(-23, -15, 3.5, 2.5, -0.4, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#f07f32"; ctx.beginPath(); ctx.ellipse(0, -11, 11, 5.5, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(8, -9); ctx.lineTo(19, -12); ctx.lineTo(10, -18); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(9, -16); ctx.lineTo(10, -23); ctx.lineTo(13, -17); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(10, -10); ctx.lineTo(19, -12); ctx.lineTo(12, -13); ctx.fill();
+      eye(13, -14, 1.2);
+    },
+    hedgehog(a) {
+      ctx.fillStyle = "#6b4a2e";
+      ctx.beginPath(); ctx.moveTo(-11, -2);
+      for (let i = 0; i <= 10; i++) { const ang = Math.PI + (i / 10) * Math.PI; const r = i % 2 ? 9 : 13; ctx.lineTo(Math.cos(ang) * r, -2 + Math.sin(ang) * r); }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#e6c79a"; ctx.beginPath(); ctx.ellipse(10, -4, 5, 4, 0.2, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#1d140a"; ctx.beginPath(); ctx.arc(15, -4, 1.4, 0, 6.283); ctx.fill();
+      eye(10, -6, 1.1);
+    },
+    snail(a) {
+      ctx.fillStyle = "#b8c99a"; ctx.beginPath(); ctx.ellipse(1, -2, 11, 3, 0, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = "#b8c99a"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(10, -3); ctx.lineTo(13, -10); ctx.moveTo(9, -3); ctx.lineTo(10, -10); ctx.stroke();
+      ctx.fillStyle = "#e08ab0"; ctx.beginPath(); ctx.arc(-1, -8, 7, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = "#a8507a"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(-1, -8, 4, 0, 5); ctx.stroke();
+    },
+    goat(a, t, ph) {
+      legs(2, -7, 4, -9, 10, ph, "#9b9488"); legs(2, 5, 4, -9, 10, ph + 0.5, "#9b9488");
+      ctx.fillStyle = "#f2efe8"; ctx.beginPath(); ctx.ellipse(0, -14, 12, 7, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(13, -20, 5, 4, 0.4, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = "#7a6a55"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(10, -26, 4, Math.PI, Math.PI * 1.8); ctx.stroke();
+      ctx.fillStyle = "#d8d2c6"; ctx.beginPath(); ctx.moveTo(15, -17); ctx.lineTo(16, -12); ctx.lineTo(13, -16); ctx.fill();
+      eye(14, -21, 1.1);
+    },
+    penguin(a, t, ph) {
+      ctx.rotate(Math.sin(ph * 12) * 0.12);
+      ctx.fillStyle = "#ff9f2a"; ctx.beginPath(); ctx.ellipse(-3, 0, 3, 1.5, 0, 0, 6.283); ctx.ellipse(3, 0, 3, 1.5, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#1f2630"; ctx.beginPath(); ctx.ellipse(0, -11, 8, 11, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(2, -9, 5, 8, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#ff9f2a"; ctx.beginPath(); ctx.moveTo(6, -17); ctx.lineTo(11, -16); ctx.lineTo(6, -15); ctx.fill();
+      eye(4, -18, 1.2);
+    },
+    lizard(a, t, ph, fire) {
+      const c = fire ? "#ff6a1f" : "#7cc46a", c2 = fire ? "#2a1a14" : "#4f9a45";
+      if (fire) { const g = ctx.createRadialGradient(0, -3, 0, 0, -3, 22); g.addColorStop(0, "rgba(255,120,40,0.35)"); g.addColorStop(1, "rgba(255,120,40,0)"); ctx.fillStyle = g; ctx.fillRect(-22, -25, 44, 44); }
+      const w = Math.sin(ph * 14) * 3;
+      ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-6, -3); ctx.quadraticCurveTo(-14, -3 + w, -20, -1 - w); ctx.stroke();
+      ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(-3, -3); ctx.lineTo(-5, 2 + w); ctx.moveTo(4, -3); ctx.lineTo(6, 2 - w);
+      ctx.moveTo(-3, -3); ctx.lineTo(-5, -8 - w); ctx.moveTo(4, -3); ctx.lineTo(6, -8 + w); ctx.stroke();
+      ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(0, -3, 8, 3.5, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(10, -3, 4, 3, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = c2; for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(i * 4, -3, 1.2, 0, 6.283); ctx.fill(); }
+      eye(11, -4, 1);
+    },
+    salamander(a, t, ph) { ANIMAL_DRAW.lizard(a, t, ph, true); },
+    crab(a, t, ph) {
+      ctx.strokeStyle = "#c2382f"; ctx.lineWidth = 1.6;
+      for (let i = -1; i <= 1; i++) { const s = Math.sin(ph * 16 + i) * 2; ctx.beginPath(); ctx.moveTo(-6, -3 + i * 2); ctx.lineTo(-11, -1 + i * 3 + s); ctx.moveTo(6, -3 + i * 2); ctx.lineTo(11, -1 + i * 3 - s); ctx.stroke(); }
+      ctx.fillStyle = "#e8483f"; ctx.beginPath(); ctx.ellipse(0, -4, 8, 5, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(-10, -10, 3.2, 0, 6.283); ctx.arc(10, -10, 3.2, 0, 6.283); ctx.fill();
+      eye(-2.5, -8, 1.2); eye(2.5, -8, 1.2);
+    },
+    duck(a, t) {
+      ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(-4, 2, 14 + Math.sin(t * 3) * 2, 4, 0, 0, 6.283); ctx.stroke();
+      ctx.fillStyle = "#f4efe2"; ctx.beginPath(); ctx.ellipse(-2, -3, 11, 6, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#2f8a55"; ctx.beginPath(); ctx.arc(8, -10, 5, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#ffb03a"; ctx.beginPath(); ctx.ellipse(14, -9, 4, 1.8, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#d8cfbd"; ctx.beginPath(); ctx.ellipse(-4, -4, 6, 3, -0.2, 0, 6.283); ctx.fill();
+      eye(9, -11, 1.1);
+    },
+    fish(a, t) {
+      const ph = (t * 0.22 + a.p[4] / 6.283) % 1;
+      if (ph < 0.1) {               // прыжок из воды
+        const k = ph / 0.1, h = Math.sin(k * Math.PI) * 18;
+        ctx.save(); ctx.translate((k - 0.5) * 26, -h); ctx.rotate((k - 0.5) * 1.6);
+        ctx.fillStyle = "#ff9a3c"; ctx.beginPath(); ctx.ellipse(0, 0, 8, 4, 0, 0, 6.283); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(-12, -4); ctx.lineTo(-12, 4); ctx.fill();
+        eye(4, -1, 1); ctx.restore();
+      }
+      if (ph < 0.2) {
+        const r = ph < 0.1 ? 4 : (ph - 0.1) * 160 + 4;
+        ctx.strokeStyle = `rgba(255,255,255,${ph < 0.1 ? 0.6 : 0.6 - (ph - 0.1) * 6})`; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(13, 0, r, r * 0.4, 0, 0, 6.283); ctx.stroke();
+      } else {
+        ctx.fillStyle = "rgba(20,50,80,0.25)"; ctx.beginPath(); ctx.ellipse(0, 0, 8, 3.5, 0, 0, 6.283); ctx.fill();
+      }
+    },
+  };
+
+  function drawAnimals(camX, camY, t, dt) {
+    const wt = Date.now() / 1000;          // общее время для всех игроков
+    const a0x = Math.floor((camX - 200) / ACELL), a1x = Math.floor((camX + W + 200) / ACELL);
+    const a0y = Math.floor((camY - 200) / ACELL), a1y = Math.floor((camY + H + 200) / ACELL);
+    const list = [];
+    for (let ay = a0y; ay <= a1y; ay++) for (let ax = a0x; ax <= a1x; ax++) {
+      const a = animalAt(ax, ay);
+      if (!a) continue;
+      const [x, y, vx, hop, ph] = animalPos(a, wt);
+      const mode = KINDS[a.kind][0];
+      // убегают от пчёлки (кроме летающих и рыб)
+      if (mode !== "fly" && a.kind !== "fish") {
+        const dx = x + a.ox - player.x, dy = y + a.oy - player.y, d = Math.hypot(dx, dy);
+        if (d < 110 && d > 0.1) { const k = Math.min(1, (110 - d) / 110) * 220 * dt; a.ox += (dx / d) * k; a.oy += (dy / d) * k; }
+        else { a.ox *= 0.985; a.oy *= 0.985; }
+        const ol = Math.hypot(a.ox, a.oy); if (ol > 140) { a.ox *= 140 / ol; a.oy *= 140 / ol; }
+      }
+      list.push([a, x + a.ox, y + a.oy, vx, hop, ph, mode]);
+    }
+    list.sort((p, q) => p[2] - q[2]);
+    for (const [a, x, y, vx, hop, ph, mode] of list) {
+      const sx = x - camX, sy = y - camY;
+      if (sx < -60 || sy < -60 || sx > W + 60 || sy > H + 60) continue;
+      const S = ASCALE[a.kind] || 1.9;
+      if (mode === "fly") shadow(ctx, sx, sy + 2, (a.kind === "parrot" ? 9 : 5) * S, 2.5 * S);
+      else if (mode !== "swim") shadow(ctx, sx, sy + 1, 11 * S, 3.5 * S);
+      ctx.save();
+      ctx.translate(sx, sy - hop * S);
+      ctx.scale(S, S);
+      if (mode === "fly") ctx.translate(0, Math.sin(wt * 3 + a.p[1]) * 4);
+      if (vx < 0 && a.kind !== "crab" && a.kind !== "firefly") ctx.scale(-1, 1);
+      ANIMAL_DRAW[a.kind](a, wt, ph);
+      ctx.restore();
+    }
+  }
+
   // ---------- мини-игра сбора ----------
   // По полоске бегает метка. Нужно 3 раза нажать, когда она в зелёной зоне. Чем реже цветок, тем быстрее.
   let mg = null, near = null, busy = false, sellBusy = false, sellRetry = 0, posBusy = false, posT = 0, lastSaved = null;
@@ -880,7 +1161,7 @@
     const sx = HX - player.x + W / 2, sy = HY - player.y + H / 2;
     if (sx > -40 && sy > 0 && sx < W + 40 && sy < H + 140) return;
     const a = Math.atan2(HY - player.y, HX - player.x);
-    const rx = W / 2 - 60, ry = H / 2 - 70;
+    const rx = W / 2 - 60, ry = H / 2 - 110;
     const k = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
     const ax = W / 2 + Math.cos(a) * k;
     let ay = H / 2 + Math.sin(a) * k;
@@ -1160,6 +1441,7 @@
       mg.pos += mg.dir * mg.speed * dt;
       if (mg.pos > 1) { mg.pos = 1; mg.dir = -1; } else if (mg.pos < 0) { mg.pos = 0; mg.dir = 1; }
     }
+    drawAnimals(camX, camY, t, dt);
     if (hiveOn) drawHive(hsx, hsy, t);
 
     // в улье пыльца сама превращается в мёд
