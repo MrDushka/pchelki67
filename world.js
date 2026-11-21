@@ -1116,7 +1116,7 @@
   // Осы летят к пчёлке: коснёшься осы — цветок закроется. Чем реже цветок, тем больше пыльцы ловить и тем больше ос.
   let mgDown = false;
   function startCatch(f) {
-    mg = { f, need: 8 + f.tier, got: 0, time: 0, dur: 7 + f.tier * 0.9, spawnT: 0.2, items: [], pops: [], bx: 0.5, by: 0.55, tx: null, ty: null, face: 1 };
+    mg = { f, need: 6 + f.tier, got: 0, time: 0, dur: 9 + f.tier, spawnT: 0.2, items: [], pops: [], bx: 0.5, by: 0.55, tx: null, ty: null, face: 1 };
   }
   function mgRect() {
     const w = Math.min(400, W - 24), h = Math.min(300, Math.max(220, H - 230));
@@ -1143,11 +1143,11 @@
     if (keys.has("s") || keys.has("arrowdown") || keys.has("ы")) ky += 1;
     if (kx || ky) {
       mg.tx = null;
-      const l = Math.hypot(kx, ky), sp = 300 * dt;
+      const l = Math.hypot(kx, ky), sp = 360 * dt;
       mg.bx += (kx / l) * sp / A.w; mg.by += (ky / l) * sp / A.h;
       if (kx) mg.face = kx > 0 ? 1 : -1;
     } else if (mg.tx != null) {
-      const dx = (mg.tx - mg.bx) * A.w, dy = (mg.ty - mg.by) * A.h, d = Math.hypot(dx, dy), step = 520 * dt;
+      const dx = (mg.tx - mg.bx) * A.w, dy = (mg.ty - mg.by) * A.h, d = Math.hypot(dx, dy), step = 620 * dt;
       if (Math.abs(dx) > 2) mg.face = dx > 0 ? 1 : -1;
       if (d <= step) { mg.bx = mg.tx; mg.by = mg.ty; mg.tx = null; }
       else { mg.bx += (dx / d) * step / A.w; mg.by += (dy / d) * step / A.h; }
@@ -1158,18 +1158,18 @@
     if (mg.spawnT <= 0 && mg.items.length < 5) {
       mg.spawnT = 0.42 - tier * 0.03;
       const wasps = mg.items.filter((i) => i.wasp).length;
-      const wasp = wasps < (tier >= 3 ? 2 : 1) && Math.random() < 0.3 + tier * 0.06;
+      const wasp = wasps < (tier >= 3 ? 2 : 1) && Math.random() < 0.2 + tier * 0.05;
       let x, y, tries = 0;
       do { x = 0.08 + Math.random() * 0.84; y = 0.1 + Math.random() * 0.8; }
       while (++tries < 8 && Math.hypot((x - mg.bx) * A.w, (y - mg.by) * A.h) < (wasp ? 120 : 50));
-      const sp = 0.4 + tier * 0.1;
-      mg.items.push({ x, y, age: 0, life: wasp ? 3.2 : Math.max(0.7, 1.15 - tier * 0.1), wasp, vx: (Math.random() - 0.5) * sp, vy: (Math.random() - 0.5) * sp, ph: Math.random() * 6 });
+      const sp = 0.25 + tier * 0.07;
+      mg.items.push({ x, y, age: 0, life: wasp ? 3.2 : Math.max(1.0, 1.6 - tier * 0.12), wasp, vx: (Math.random() - 0.5) * sp, vy: (Math.random() - 0.5) * sp, ph: Math.random() * 6 });
     }
     for (let i = mg.items.length - 1; i >= 0; i--) {
       const it = mg.items[i];
       it.age += dt;
       if (it.wasp) {            // оса медленно летит к пчёлке
-        const dx = (mg.bx - it.x) * A.w, dy = (mg.by - it.y) * A.h, d = Math.hypot(dx, dy) || 1, v = (90 + tier * 8) * dt;
+        const dx = (mg.bx - it.x) * A.w, dy = (mg.by - it.y) * A.h, d = Math.hypot(dx, dy) || 1, v = (70 + tier * 7) * dt;
         it.x += (dx / d) * v / A.w; it.y += (dy / d) * v / A.h;
       } else {
         it.x += it.vx * dt; it.y += it.vy * dt;
@@ -1179,7 +1179,7 @@
       if (it.age > it.life) { mg.items.splice(i, 1); continue; }
       const d = Math.hypot((it.x - mg.bx) * A.w, (it.y - mg.by) * A.h);
       if (it.wasp && d < 20) return mgFail("Ой! Ужалила оса");
-      if (!it.wasp && d < 17) { catchItem(i); if (!mg) return; }
+      if (!it.wasp && d < 21) { catchItem(i); if (!mg) return; }
     }
     for (let i = mg.pops.length - 1; i >= 0; i--) { mg.pops[i].age += dt; if (mg.pops[i].age > 0.5) mg.pops.splice(i, 1); }
   }
@@ -1244,7 +1244,7 @@
       const fade = Math.min(1, (it.life - it.age) / 0.45), grow = Math.min(1, it.age / 0.15);
       ctx.globalAlpha = Math.max(0, fade);
       if (it.wasp) { drawWasp(x, y, t + it.ph); ctx.globalAlpha = 1; continue; }
-      const r = 9 * grow * (1 + Math.sin(t * 8 + it.ph) * 0.08);
+      const r = 10.5 * grow * (1 + Math.sin(t * 8 + it.ph) * 0.08);
       const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.6); g.addColorStop(0, `rgba(${glow},0.7)`); g.addColorStop(1, `rgba(${glow},0)`);
       ctx.fillStyle = g; ctx.fillRect(x - r * 2.6, y - r * 2.6, r * 5.2, r * 5.2);
       ctx.fillStyle = f.tier ? `rgb(${glow})` : "#ffcf3a";
