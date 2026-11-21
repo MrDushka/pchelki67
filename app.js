@@ -111,10 +111,13 @@ function renderHome() {
 }
 
 $("#btn-journey").addEventListener("click", () => {
-  const m = $("#journey-msg");
-  m.textContent = "Пчёлки готовят улей к боям. Путешествие откроется совсем скоро!";
-  m.className = "msg ok";
+  document.querySelector(".card").style.display = "none";
+  window.BeeWorld.start({
+    nick: user.nickname,
+    onExit: () => { document.querySelector(".card").style.display = ""; },
+  });
 });
+$("#world-back").addEventListener("click", () => window.BeeWorld.stop());
 
 $("#btn-logout").addEventListener("click", () => {
   if (sessionToken) sb.rpc("logout", { p_token: sessionToken });

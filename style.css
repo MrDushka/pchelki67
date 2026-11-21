@@ -116,3 +116,22 @@ input:focus { border-color: var(--honey-dark); }
 .stats div { flex: 1; border: 3px solid var(--ink); border-radius: 16px; padding: 10px; background: var(--bg); }
 .stats span { display: block; font-size: 1.6rem; font-weight: 800; }
 .stats small { color: var(--muted); }
+
+/* Мир */
+#world-wrap { display: none; position: fixed; inset: 0; z-index: 50; background: #0d1020; }
+#world-wrap.on { display: block; }
+#world { display: block; touch-action: none; cursor: grab; }
+.world-hud { position: fixed; top: 14px; left: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.world-back {
+  font: 800 .95rem "Rubik", sans-serif; padding: 10px 14px; border-radius: 14px;
+  border: 3px solid #2b1d0e; background: #ffb703; color: #2b1d0e; box-shadow: 0 3px 0 #2b1d0e; cursor: pointer;
+}
+.world-info {
+  display: flex; flex-direction: column; padding: 6px 12px; border-radius: 12px;
+  background: rgba(8,10,24,.7); color: #fff4d6; font-size: .85rem;
+}
+.world-info b { font-size: 1rem; color: #ffd166; }
+.world-help {
+  position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
+  padding: 6px 12px; border-radius: 12px; background: rgba(8,10,24,.6); color: #fff4d6; font-size: .8rem; text-align: center;
+}
