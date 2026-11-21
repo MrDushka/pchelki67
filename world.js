@@ -1,8 +1,9 @@
-// Пчёлки 67: мир 1 000 000 × 1 000 000 пикселей.
+// Пчёлки 67: мир 2 000 000 × 2 000 000 пикселей, улей в центре, координаты от −1 000 000 до 1 000 000.
 // Мир не хранится целиком: каждый кусок (чанк) рисуется на лету из шума по одному и тому же зерну,
 // поэтому у всех игроков одинаковая карта.
 (() => {
-  const WORLD = 1_000_000;
+  const WORLD = 2_000_000;
+  const OFF = 500_000;      // сдвиг шума: местность вокруг улья осталась прежней
   const CHUNK = 512;       // размер чанка в пикселях
   const CELL = 16;         // шаг заливки земли
   const TILE = 32;         // шаг расстановки растений
@@ -34,32 +35,41 @@
   }
 
   // ---------- биомы ----------
-  const B = { DEEP: 0, SHALLOW: 1, SAND: 2, MEADOW: 3, FLOWERS: 4, FOREST: 5, SAKURA: 6, GOLDEN: 7, ROCK: 8, SNOW: 9 };
+  const B = { DEEP: 0, SHALLOW: 1, SAND: 2, MEADOW: 3, FLOWERS: 4, FOREST: 5, SAKURA: 6, GOLDEN: 7, ROCK: 8, SNOW: 9,
+    LAVENDER: 10, AUTUMN: 11, SWAMP: 12, MUSHROOM: 13, DESERT: 14, JUNGLE: 15, ICE: 16, VOLCANO: 17, CRYSTAL: 18 };
   const NAMES = ["Глубокое озеро", "Мелководье", "Пляж", "Зелёный луг", "Цветочная долина",
-    "Тихий лес", "Сакуровая роща", "Золотое поле", "Скалы", "Снежная вершина"];
+    "Тихий лес", "Сакуровая роща", "Золотое поле", "Скалы", "Снежная вершина",
+    "Лавандовое поле", "Осенний лес", "Болото", "Грибной лес", "Медовые дюны",
+    "Джунгли", "Ледяное озеро", "Вулканы", "Хрустальные холмы"];
 
+  // e — высота, m — влажность, f — «цветочность», T — тепло
   function biome(x, y) {
-    const cont = fbm(x / 70000, y / 70000, 3, 7);
-    let e = fbm(x / 9000, y / 9000, 5, 1) * 0.65 + cont * 0.35;
-    let m = fbm(x / 5200 + 100, y / 5200, 4, 3);
+    const nx = x - OFF, ny = y - OFF;
+    const cont = fbm(nx / 70000, ny / 70000, 3, 7);
+    let e = fbm(nx / 9000, ny / 9000, 5, 1) * 0.65 + cont * 0.35;
+    let m = fbm(nx / 5200 + 100, ny / 5200, 4, 3);
+    const f = fbm(nx / 3600, ny / 3600 + 50, 3, 5);
+    let T = fbm(nx / 16000 + 300, ny / 16000 - 200, 3, 13);
     // вокруг улья (центр мира) всегда цветочная поляна
     const hd = Math.hypot(x - WORLD / 2, y - WORLD / 2);
     if (hd < 3000) {
       const k = hd < 1200 ? 0 : (hd - 1200) / 1800, kk = k * k * (3 - 2 * k);
-      e = 0.52 + (e - 0.52) * kk; m = 0.5 + (m - 0.5) * kk;
+      e = 0.52 + (e - 0.52) * kk; m = 0.5 + (m - 0.5) * kk; T = 0.5 + (T - 0.5) * kk;
     }
-    const f = fbm(x / 3600, y / 3600 + 50, 3, 5);
     let b;
-    if (e < 0.40) b = B.DEEP;
-    else if (e < 0.43) b = B.SHALLOW;
+    if (e < 0.40) b = T < 0.38 ? B.ICE : B.DEEP;
+    else if (e < 0.43) b = T < 0.38 ? B.ICE : B.SHALLOW;
     else if (e < 0.445) b = B.SAND;
-    else if (e > 0.665) b = B.SNOW;
-    else if (e > 0.615) b = B.ROCK;
-    else if (m > 0.56) b = f > 0.53 ? B.SAKURA : B.FOREST;
+    else if (e > 0.665) b = T > 0.6 ? B.VOLCANO : B.SNOW;
+    else if (e > 0.615) b = f > 0.58 ? B.CRYSTAL : B.ROCK;
+    else if (m > 0.6 && e < 0.49) b = B.SWAMP;
+    else if (T > 0.6) b = m < 0.45 ? B.DESERT : m > 0.54 ? B.JUNGLE : B.GOLDEN;
+    else if (T < 0.4) b = m > 0.53 ? B.AUTUMN : m < 0.46 ? B.LAVENDER : B.MEADOW;
+    else if (m > 0.56) b = f > 0.6 ? B.MUSHROOM : f > 0.53 ? B.SAKURA : B.FOREST;
     else if (m < 0.42) b = B.GOLDEN;
     else if (f > 0.52) b = B.FLOWERS;
     else b = B.MEADOW;
-    return { b, e, m, f };
+    return { b, e, m, f, T };
   }
 
   // ---------- цвета ----------
@@ -75,6 +85,12 @@
     flowers: hex("#9bd877"), forest: hex("#4e9b52"), forestDark: hex("#3d8447"),
     sakura: hex("#a9d97e"), golden: hex("#d8d670"), goldenDark: hex("#c3c25a"),
     rock: hex("#a9a39b"), rockDark: hex("#8d877f"), snow: hex("#f3f7fc"),
+    lav: hex("#a9c983"), lavDark: hex("#98b877"), autumn: hex("#d0a85c"), autumnDark: hex("#bd8c44"),
+    swamp: hex("#6b8a50"), swampDark: hex("#587a45"), swampWater: hex("#4e6e5c"),
+    mush: hex("#6e5f8e"), mushDark: hex("#5a4c78"), desert: hex("#f3d282"), desertDark: hex("#e3b660"),
+    jungle: hex("#3f9a4a"), jungleDark: hex("#2f8040"), ice: hex("#d6eefa"), iceDark: hex("#b5dcef"),
+    ash: hex("#4d403d"), ashDark: hex("#3b302e"), lava: hex("#ff6a1f"), lavaHot: hex("#ffd34a"),
+    crys: hex("#a39dc0"), crysDark: hex("#8a84a8"),
   };
   const FLOWER_COLORS = ["#b58cf0", "#ff9ec7", "#ff5f6d", "#ffd84d", "#7fb8ff", "#fff6ec"];
 
@@ -92,6 +108,18 @@
       case B.SAKURA: return scale(C.sakura, k);
       case B.GOLDEN: return scale(mix(C.golden, C.goldenDark, n), k);
       case B.ROCK: return scale(mix(C.rock, C.rockDark, n), 0.95 + (info.e - 0.615) * 2);
+      case B.LAVENDER: return scale(mix(C.lav, C.lavDark, n), k);
+      case B.AUTUMN: return scale(mix(C.autumn, C.autumnDark, n), k);
+      case B.SWAMP: return vnoise(x / 140, y / 140, 15) > 0.62 ? scale(C.swampWater, k) : scale(mix(C.swamp, C.swampDark, n), k);
+      case B.MUSHROOM: return scale(mix(C.mush, C.mushDark, n), k);
+      case B.DESERT: {
+        const dune = 0.5 + 0.5 * Math.sin(x / 70 + y / 260 + vnoise(x / 400, y / 400, 16) * 8);
+        return scale(mix(C.desert, C.desertDark, dune * 0.6), k);
+      }
+      case B.JUNGLE: return scale(mix(C.jungle, C.jungleDark, n), k);
+      case B.ICE: return mix(C.ice, C.iceDark, n);
+      case B.VOLCANO: return scale(mix(C.ash, C.ashDark, n), k);
+      case B.CRYSTAL: return scale(mix(C.crys, C.crysDark, n), k);
       default: return scale(C.snow, 0.97 + n * 0.04);
     }
   }
@@ -205,6 +233,116 @@
     ctx.beginPath(); ctx.arc(x, y, 3.5, Math.PI, 0); ctx.fill();
   }
 
+  // ---------- растения новых локаций ----------
+  function lavender(ctx, x, y, s) {
+    ctx.lineWidth = 1.5;
+    for (let i = -1; i <= 1; i++) {
+      const bx = x + i * 5;
+      ctx.strokeStyle = "#6f8f4f"; ctx.beginPath(); ctx.moveTo(bx, y); ctx.lineTo(bx + i, y - 15 * s); ctx.stroke();
+      ctx.fillStyle = i === 0 ? "#9b6fd6" : "#b48be6";
+      for (let j = 0; j < 4; j++) { ctx.beginPath(); ctx.ellipse(bx + i, y - 10 * s - j * 3.2, 2.2, 1.8, 0, 0, 6.283); ctx.fill(); }
+    }
+  }
+  function leaves(ctx, x, y, r) {
+    const cols = ["#e0782f", "#f2a541", "#d9534f", "#e8b04a"];
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = cols[i];
+      ctx.beginPath(); ctx.ellipse(x + (hash(x, i, 5) - 0.5) * 24, y + (hash(i, y, 6) - 0.5) * 24, 3.2, 1.8, r + i, 0, 6.283); ctx.fill();
+    }
+  }
+  function cattail(ctx, x, y) {
+    ctx.strokeStyle = "#6d8f4a"; ctx.lineWidth = 1.6;
+    for (const [dx, h] of [[-4, 18], [0, 24], [4, 16]]) {
+      ctx.beginPath(); ctx.moveTo(x + dx, y); ctx.lineTo(x + dx * 1.3, y - h); ctx.stroke();
+      ctx.fillStyle = "#7a4a22"; ctx.beginPath(); ctx.ellipse(x + dx * 1.3, y - h + 3, 2.2, 5, 0, 0, 6.283); ctx.fill();
+    }
+  }
+  function puddle(ctx, x, y, s) {
+    ctx.fillStyle = "rgba(40,70,60,0.55)"; ctx.beginPath(); ctx.ellipse(x, y, 15 * s, 6 * s, 0, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.beginPath(); ctx.ellipse(x - 4 * s, y - 1.5, 5 * s, 1.2, 0, 0, 6.283); ctx.fill();
+  }
+  function bigMushroom(ctx, x, y, s, cap) {
+    shadow(ctx, x + 3, y + 2, 20 * s, 7 * s);
+    ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.arc(x, y - 22 * s, 30 * s, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "#efe3d0"; ctx.beginPath(); ctx.roundRect(x - 5 * s, y - 22 * s, 10 * s, 22 * s, 4 * s); ctx.fill();
+    ctx.fillStyle = cap; ctx.beginPath(); ctx.ellipse(x, y - 22 * s, 22 * s, 15 * s, 0, Math.PI, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.beginPath(); ctx.ellipse(x, y - 22 * s, 22 * s, 3.5 * s, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    for (const [dx, dy, r] of [[-9, -29, 3], [4, -33, 2.4], [11, -25, 2], [-2, -25, 1.8]]) { ctx.beginPath(); ctx.arc(x + dx * s, y + dy * s, r * s, 0, 6.283); ctx.fill(); }
+  }
+  function glowShroom(ctx, x, y, col) {
+    const g = ctx.createRadialGradient(x, y - 4, 0, x, y - 4, 14); g.addColorStop(0, col + "88"); g.addColorStop(1, col + "00");
+    ctx.fillStyle = g; ctx.fillRect(x - 14, y - 18, 28, 28);
+    ctx.fillStyle = "#e9e1f0"; ctx.fillRect(x - 1.2, y - 5, 2.4, 5);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y - 5, 5, 3.5, 0, Math.PI, 0); ctx.fill();
+  }
+  function cactus(ctx, x, y, s) {
+    shadow(ctx, x + 3, y + 2, 10 * s, 4 * s);
+    ctx.fillStyle = "#5aa557"; ctx.strokeStyle = "#3f7d3c"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(x - 5 * s, y - 32 * s, 10 * s, 32 * s, 5 * s); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(x - 14 * s, y - 22 * s, 6 * s, 12 * s, 3 * s); ctx.fill(); ctx.stroke();
+    ctx.fillRect(x - 10 * s, y - 13 * s, 6 * s, 4 * s);
+    ctx.beginPath(); ctx.roundRect(x + 8 * s, y - 27 * s, 6 * s, 12 * s, 3 * s); ctx.fill(); ctx.stroke();
+    ctx.fillRect(x + 4 * s, y - 18 * s, 6 * s, 4 * s);
+    ctx.fillStyle = "#ff7fb0"; ctx.beginPath(); ctx.arc(x, y - 33 * s, 3 * s, 0, 6.283); ctx.fill();
+  }
+  function palm(ctx, x, y, s) {
+    shadow(ctx, x + 14 * s, y + 2, 24 * s, 8 * s);
+    ctx.strokeStyle = "#a8743f"; ctx.lineWidth = 6 * s; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + 4 * s, y - 24 * s, x + 12 * s, y - 44 * s); ctx.stroke();
+    const tx = x + 12 * s, ty = y - 46 * s;
+    for (let i = 0; i < 7; i++) {
+      const a = -Math.PI / 2 + (i - 3) * 0.75;
+      ctx.fillStyle = i % 2 ? "#3fae4f" : "#2f9a42";
+      ctx.beginPath(); ctx.moveTo(tx, ty);
+      ctx.quadraticCurveTo(tx + Math.cos(a - 0.3) * 20 * s, ty + Math.sin(a - 0.3) * 20 * s, tx + Math.cos(a) * 30 * s, ty + Math.sin(a) * 30 * s + 8 * s);
+      ctx.quadraticCurveTo(tx + Math.cos(a + 0.3) * 16 * s, ty + Math.sin(a + 0.3) * 16 * s, tx, ty); ctx.fill();
+    }
+    ctx.fillStyle = "#7a4a1e";
+    ctx.beginPath(); ctx.arc(tx - 3 * s, ty + 4 * s, 3 * s, 0, 6.283); ctx.arc(tx + 3 * s, ty + 5 * s, 3 * s, 0, 6.283); ctx.fill();
+  }
+  function iceChunk(ctx, x, y, s) {
+    shadow(ctx, x + 2, y + 2, 12 * s, 4 * s);
+    ctx.fillStyle = "#eef9ff"; ctx.strokeStyle = "#9fd0ea"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - 11 * s, y); ctx.lineTo(x - 8 * s, y - 14 * s); ctx.lineTo(x + 2 * s, y - 19 * s);
+    ctx.lineTo(x + 11 * s, y - 9 * s); ctx.lineTo(x + 9 * s, y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#c4e7f7"; ctx.beginPath(); ctx.moveTo(x + 2 * s, y - 19 * s); ctx.lineTo(x + 11 * s, y - 9 * s); ctx.lineTo(x + 9 * s, y); ctx.lineTo(x + 1 * s, y); ctx.closePath(); ctx.fill();
+  }
+  function crack(ctx, x, y, r) {
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(x - 12, y - 3);
+    ctx.lineTo(x - 4, y + 2 - r * 4); ctx.lineTo(x + 3, y - 2); ctx.lineTo(x + 12, y + 3 + r * 3);
+    ctx.moveTo(x + 3, y - 2); ctx.lineTo(x + 5, y - 9); ctx.stroke();
+  }
+  function lavaPool(ctx, x, y, s) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 30 * s);
+    g.addColorStop(0, "rgba(255,150,40,0.45)"); g.addColorStop(1, "rgba(255,90,20,0)");
+    ctx.fillStyle = g; ctx.fillRect(x - 30 * s, y - 30 * s, 60 * s, 60 * s);
+    ctx.fillStyle = "#2c2220"; ctx.beginPath(); ctx.ellipse(x, y, 21 * s, 12 * s, 0.2, 0, 6.283); ctx.fill();
+    const lg = ctx.createRadialGradient(x - 3 * s, y - 2 * s, 1, x, y, 18 * s);
+    lg.addColorStop(0, "#ffe46a"); lg.addColorStop(0.5, "#ff9a2a"); lg.addColorStop(1, "#e8451a");
+    ctx.fillStyle = lg; ctx.beginPath(); ctx.ellipse(x, y, 17 * s, 9 * s, 0.2, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,200,0.6)"; ctx.beginPath(); ctx.arc(x + 5 * s, y - 2 * s, 2 * s, 0, 6.283); ctx.arc(x - 7 * s, y + 2 * s, 1.4 * s, 0, 6.283); ctx.fill();
+  }
+  function lavaRock(ctx, x, y, s) {
+    rock(ctx, x, y, s, "#3d3230");
+    ctx.strokeStyle = "#ff7a2a"; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(x - 6 * s, y - 3 * s); ctx.lineTo(x - 1 * s, y - 9 * s); ctx.lineTo(x + 4 * s, y - 5 * s); ctx.stroke();
+    ctx.fillStyle = "rgba(255,120,40,0.25)"; ctx.beginPath(); ctx.arc(x, y - 6 * s, 14 * s, 0, 6.283); ctx.fill();
+  }
+  function crystal(ctx, x, y, s, col) {
+    shadow(ctx, x + 2, y + 2, 13 * s, 5 * s);
+    ctx.fillStyle = col + "33"; ctx.beginPath(); ctx.arc(x, y - 14 * s, 22 * s, 0, 6.283); ctx.fill();
+    for (const [dx, h, w, a] of [[-7, 18, 5, -0.35], [0, 28, 6, 0], [7, 16, 4.5, 0.4]]) {
+      ctx.save(); ctx.translate(x + dx * s, y); ctx.rotate(a);
+      ctx.fillStyle = col; ctx.beginPath();
+      ctx.moveTo(-w * s, 0); ctx.lineTo(-w * s, -h * s); ctx.lineTo(0, -(h + 7) * s); ctx.lineTo(w * s, -h * s); ctx.lineTo(w * s, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.beginPath();
+      ctx.moveTo(-w * s, 0); ctx.lineTo(-w * s, -h * s); ctx.lineTo(0, -(h + 7) * s); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+
   function decorate(ctx, wx, wy, lx, ly, info, r, r2) {
     switch (info.b) {
       case B.MEADOW:
@@ -254,6 +392,53 @@
         break;
       case B.SNOW:
         if (r < 0.04) rock(ctx, lx, ly, 0.8, "#cfd6de");
+        break;
+      case B.LAVENDER:
+        if (r < 0.01) tree(ctx, lx, ly, 0.85, "#7fb069", "#a3cf8a");
+        else if (r < 0.7) lavender(ctx, lx, ly, 0.9 + r2 * 0.4);
+        else if (r < 0.8) tuft(ctx, lx, ly, "#7f9a5a");
+        break;
+      case B.AUTUMN:
+        if (r < 0.18) tree(ctx, lx, ly, 1 + r2 * 0.4, r2 < 0.33 ? "#e0782f" : r2 < 0.66 ? "#f2a541" : "#d9534f", "#ffc36b");
+        else if (r < 0.45) leaves(ctx, lx, ly, r2 * 6);
+        else if (r < 0.5) mushroom(ctx, lx, ly);
+        else if (r < 0.6) tuft(ctx, lx, ly, "#a08a45");
+        break;
+      case B.SWAMP:
+        if (r < 0.05) tree(ctx, lx, ly, 0.9, "#5c7a3e", "#7c9a52");
+        else if (r < 0.25) cattail(ctx, lx, ly);
+        else if (r < 0.33) puddle(ctx, lx, ly, 0.8 + r2);
+        else if (r < 0.4) lily(ctx, lx, ly, r2 < 0.3);
+        else if (r < 0.6) tuft(ctx, lx, ly, "#4f6a3a");
+        break;
+      case B.MUSHROOM:
+        if (r < 0.1) bigMushroom(ctx, lx, ly, 1 + r2 * 0.6, r2 < 0.33 ? "#b36bd6" : r2 < 0.66 ? "#5f8fe8" : "#e8607a");
+        else if (r < 0.3) glowShroom(ctx, lx, ly, r2 < 0.5 ? "#7ff0ff" : "#d38bff");
+        else if (r < 0.45) tuft(ctx, lx, ly, "#4f3f6a");
+        break;
+      case B.DESERT:
+        if (r < 0.04) cactus(ctx, lx, ly, 0.9 + r2 * 0.5);
+        else if (r < 0.07) rock(ctx, lx, ly, 0.6, "#d9b26a");
+        else if (r < 0.14) tuft(ctx, lx, ly, "#c2a053");
+        break;
+      case B.JUNGLE:
+        if (r < 0.14) palm(ctx, lx, ly, 1 + r2 * 0.4);
+        else if (r < 0.3) bush(ctx, lx, ly, "#2f8a3e", "#4fb05a");
+        else if (r < 0.4) flower(ctx, lx, ly, r2 < 0.5 ? "#ff5f3d" : "#ff3d9a", 3.6);
+        else if (r < 0.75) tuft(ctx, lx, ly, "#2f7a38");
+        break;
+      case B.ICE:
+        if (r < 0.04) iceChunk(ctx, lx, ly, 0.8 + r2 * 0.6);
+        else if (r < 0.12) crack(ctx, lx, ly, r2);
+        break;
+      case B.VOLCANO:
+        if (r < 0.04) lavaPool(ctx, lx, ly, 0.9 + r2 * 0.9);
+        else if (r < 0.1) lavaRock(ctx, lx, ly, 0.9 + r2 * 0.8);
+        else if (r < 0.14) rock(ctx, lx, ly, 0.7, "#4a3e3b");
+        break;
+      case B.CRYSTAL:
+        if (r < 0.09) crystal(ctx, lx, ly, 0.8 + r2 * 0.7, ["#ff8fd0", "#7fe0ff", "#b48bff", "#9fffc8"][(r2 * 4) | 0]);
+        else if (r < 0.14) rock(ctx, lx, ly, 0.8, "#9c96b8");
         break;
     }
   }
@@ -352,12 +537,12 @@
   const EXP = 1024;
   let explored = new Set();
   function loadExplored() {
-    try { explored = new Set(JSON.parse(localStorage.getItem("pchelki_explored") || "[]")); } catch (e) { explored = new Set(); }
+    try { explored = new Set(JSON.parse(localStorage.getItem("pchelki_explored2") || "[]")); } catch (e) { explored = new Set(); }
   }
   function saveState() {
     try {
       const arr = [...explored]; if (arr.length > 30000) arr.splice(0, arr.length - 30000);
-      localStorage.setItem("pchelki_explored", JSON.stringify(arr));
+      localStorage.setItem("pchelki_explored2", JSON.stringify(arr));
     } catch (e) {}
   }
 
@@ -365,7 +550,8 @@
   const mmCanvas = document.createElement("canvas"); mmCanvas.width = MM; mmCanvas.height = MM;
   const mmCtx = mmCanvas.getContext("2d");
   let mmCenter = null, mmRow = MM;
-  const MM_COL = ["#2b78b6", "#5cc3cf", "#f4e3b5", "#8fd36b", "#d79be8", "#4e9b52", "#ffb3d1", "#d8d670", "#a9a39b", "#f3f7fc"];
+  const MM_COL = ["#2b78b6", "#5cc3cf", "#f4e3b5", "#8fd36b", "#d79be8", "#4e9b52", "#ffb3d1", "#d8d670", "#a9a39b", "#f3f7fc",
+    "#b48be6", "#e0782f", "#587a45", "#8a6bc0", "#f3d282", "#2f8040", "#cfeefa", "#ff6a1f", "#c4b8f0"];
   function pumpMinimap(budgetMs) {
     if (!mmCenter || Math.abs(player.x - mmCenter.x) > 2500 || Math.abs(player.y - mmCenter.y) > 2500) {
       mmCenter = { x: player.x, y: player.y }; mmRow = 0;
@@ -390,7 +576,7 @@
   // ---------- улей и пыльца ----------
   // Улей стоит в центре мира, это координаты 0 0. Пыльцевые цветы стоят по сетке 256 px.
   const HX = WORLD / 2, HY = WORLD / 2, HIVE_R = 300, PCELL = 256;
-  const TIER_DIST = [0, 48000, 128000, 256000, 384000];   // с какого расстояния от улья встречается
+  const TIER_DIST = [0, 60000, 200000, 450000, 750000];   // с какого расстояния от улья встречается
   const TIER_CHANCE = [1, 0.30, 0.16, 0.08, 0.04];
   const TIER_MULT = [1, 2, 3, 5, 10];
   const TIER_NAMES = ["Солнечник", "Лунный колокольчик", "Огненная лилия", "Хрустальная роза", "Радужный лотос"];
@@ -405,7 +591,7 @@
     if (hash(gx, gy, 77) < 0.33) {
       const x = gx * PCELL + 40 + hash(gx, gy, 78) * (PCELL - 80);
       const y = gy * PCELL + 40 + hash(gx, gy, 79) * (PCELL - 80);
-      if (x > 0 && y > 0 && x < WORLD && y < WORLD && Math.hypot(x - HX, y - HY) > HIVE_R + 40 && biome(x, y).b > B.SHALLOW) {
+      if (x > 0 && y > 0 && x < WORLD && y < WORLD && Math.hypot(x - HX, y - HY) > HIVE_R + 40 && biome(x, y).b > B.SHALLOW && biome(x, y).b !== B.ICE) {
         const d = Math.hypot(gx * PCELL + PCELL / 2 - HX, gy * PCELL + PCELL / 2 - HY);
         const r = hash(gx, gy, 80);
         let tier = 0;
@@ -689,21 +875,23 @@
     ctx.textAlign = "left"; ctx.fillStyle = "#ffd166"; ctx.font = "800 13px Rubik, sans-serif";
     ctx.fillText("🏠 Улей: X 0 · Y 0", mmX + 4, y0 + 17);
     ctx.fillStyle = "#fff4d6"; ctx.font = "400 12px Rubik, sans-serif";
-    ctx.fillText(`до улья: ${Math.round(d / TILE)}`, mmX + 4, y0 + 34);
+    ctx.fillText(`до улья: ${Math.round(d)}`, mmX + 4, y0 + 34);
     // стрелка к улью, если он за экраном
     const sx = HX - player.x + W / 2, sy = HY - player.y + H / 2;
     if (sx > -40 && sy > 0 && sx < W + 40 && sy < H + 140) return;
     const a = Math.atan2(HY - player.y, HX - player.x);
     const rx = W / 2 - 60, ry = H / 2 - 70;
     const k = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
-    const ax = W / 2 + Math.cos(a) * k, ay = H / 2 + Math.sin(a) * k;
+    const ax = W / 2 + Math.cos(a) * k;
+    let ay = H / 2 + Math.sin(a) * k;
+    if (ax > W - MM - 100 && ay < 250) ay = 250;   // не залезать на мини-карту
     ctx.save(); ctx.translate(ax, ay);
     ctx.fillStyle = "rgba(8,10,24,0.65)"; ctx.beginPath(); ctx.arc(0, 0, 22, 0, 6.283); ctx.fill();
     ctx.rotate(a); ctx.fillStyle = "#ffb703";
     ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.fill();
     ctx.restore();
     ctx.fillStyle = "#fff4d6"; ctx.font = "600 11px Rubik, sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("🏠 " + Math.round(d / TILE), ax, ay + 36);
+    ctx.fillText("🏠 " + Math.round(d), ax, ay + 36);
   }
 
   const $id = (id) => document.getElementById(id);
@@ -744,10 +932,10 @@
         const X = kind === "hive" ? 0 : parseInt($id("admin-x").value, 10);
         const Y = kind === "hive" ? 0 : parseInt($id("admin-y").value, 10);
         if (!Number.isFinite(X) || !Number.isFinite(Y)) return admMsg("Впиши X и Y");
-        const r = await rpc("admin_teleport", { p_nick: null, p_x: Math.round(HX + X * TILE), p_y: Math.round(HY + Y * TILE + (kind === "hive" ? 170 : 0)) });
+        const r = await rpc("admin_teleport", { p_nick: null, p_x: Math.round(HX + X), p_y: Math.round(HY + Y + (kind === "hive" ? 170 : 0)) });
         if (r.error) return admMsg(cleanErr(r.error));
         teleportLocal(r.data.x, r.data.y);
-        return admMsg(`Ты на X ${Math.round((r.data.x - HX) / TILE)} · Y ${Math.round((r.data.y - HY) / TILE)}`, true);
+        return admMsg(`Ты на X ${r.data.x - HX} · Y ${r.data.y - HY}`, true);
       }
       if (kind === "goto") {
         let pos;
@@ -1034,7 +1222,7 @@
     // подписи
     const here = biome(player.x, player.y);
     document.getElementById("world-biome").textContent = NAMES[here.b];
-    setText($id("world-pos"), `X ${Math.round((player.x - HX) / TILE)} · Y ${Math.round((player.y - HY) / TILE)}`);
+    setText($id("world-pos"), `X ${Math.round(player.x - HX)} · Y ${Math.round(player.y - HY)}`);
     if (user) setText($id("world-bag"), `🎒 ${user.pollen}/${user.bag_cap} · 🍯 ${user.honey}`);
     const act = $id("world-act");
     if (mg) { setShown(act, true); setText(act, "Жми! 🐝"); }

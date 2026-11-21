@@ -44,7 +44,7 @@ begin
   perform _admin(p_token);
   t := _find_nick(p_nick);
   select * into u from users where nickname = t;
-  return jsonb_build_object('nick', t, 'x', coalesce(u.pos_x, 500000), 'y', coalesce(u.pos_y, 500000));
+  return jsonb_build_object('nick', t, 'x', coalesce(u.pos_x, 1000000), 'y', coalesce(u.pos_y, 1000000));
 end $$;
 
 -- Телепорт игрока (или себя, если ник пустой) в точку мира.
@@ -54,7 +54,7 @@ declare a text; t text; x int; y int;
 begin
   a := _admin(p_token);
   t := case when p_nick is null or trim(p_nick) = '' then a else _find_nick(p_nick) end;
-  x := least(1000000, greatest(0, p_x)); y := least(1000000, greatest(0, p_y));
+  x := least(2000000, greatest(0, p_x)); y := least(2000000, greatest(0, p_y));
   update users set pos_x = x, pos_y = y, pos_at = now() where nickname = t;
   return jsonb_build_object('nick', t, 'x', x, 'y', y);
 end $$;

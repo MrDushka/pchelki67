@@ -1,5 +1,5 @@
 -- ---------- пыльца, мёд, мешочек, позиция ----------
--- Мир: 0..1 000 000 px, улей в центре (500000, 500000) = координаты 0 0 в игре.
+-- Мир: 0..2 000 000 px, улей в центре (1000000, 1000000) = координаты 0 0 в игре.
 -- 10 пыльцы = 1 банка мёда. Мешочек улучшается за мёд.
 
 alter table users
@@ -26,7 +26,7 @@ create or replace function _bag_cost(lvl int) returns int language sql immutable
 $$ select (array[5,12,25,45,75,120,180])[lvl] $$;   -- null на последнем уровне
 -- редкость цветка: с какого расстояния от улья (px) встречается и во сколько раз больше пыльцы
 create or replace function _tier_dist(t int) returns int language sql immutable as
-$$ select (array[0,48000,128000,256000,384000])[t + 1] $$;
+$$ select (array[0,60000,200000,450000,750000])[t + 1] $$;
 create or replace function _tier_mult(t int) returns int language sql immutable as
 $$ select (array[1,2,3,5,10])[t + 1] $$;
 
@@ -44,10 +44,10 @@ create or replace function _move(p_nick text, p_x int, p_y int) returns boolean
 language plpgsql security definer set search_path = public as $$
 declare u users; dt float8; d float8;
 begin
-  if p_x is null or p_y is null or p_x < 0 or p_y < 0 or p_x > 1000000 or p_y > 1000000 then return false; end if;
+  if p_x is null or p_y is null or p_x < 0 or p_y < 0 or p_x > 2000000 or p_y > 2000000 then return false; end if;
   select * into u from users where nickname = p_nick for update;
   dt := coalesce(extract(epoch from now() - u.pos_at), 0);
-  d := sqrt((p_x - coalesce(u.pos_x, 500000))::float8 ^ 2 + (p_y - coalesce(u.pos_y, 500000))::float8 ^ 2);
+  d := sqrt((p_x - coalesce(u.pos_x, 1000000))::float8 ^ 2 + (p_y - coalesce(u.pos_y, 1000000))::float8 ^ 2);
   if d > dt * 800 + 800 then return false; end if;
   update users set pos_x = p_x, pos_y = p_y, pos_at = now() where nickname = p_nick;
   return true;
@@ -60,7 +60,7 @@ begin
   v := _auth(p_token);
   ok := _move(v, p_x, p_y);
   select * into u from users where nickname = v;
-  return jsonb_build_object('ok', ok, 'x', coalesce(u.pos_x, 500000), 'y', coalesce(u.pos_y, 500000));
+  return jsonb_build_object('ok', ok, 'x', coalesce(u.pos_x, 1000000), 'y', coalesce(u.pos_y, 1000000));
 end $$;
 
 -- Сбор пыльцы после мини-игры. Количество выбирает сервер: 2..7 × редкость.
@@ -73,7 +73,7 @@ begin
   if p_tier is null or p_tier < 0 or p_tier > 4 then raise exception 'Нет такого цветка'; end if;
   cx := p_gx * 256 + 128; cy := p_gy * 256 + 128;
   if sqrt((p_x - cx) ^ 2 + (p_y - cy) ^ 2) > 260 then raise exception 'Цветок слишком далеко'; end if;
-  if sqrt((cx - 500000) ^ 2 + (cy - 500000) ^ 2) < _tier_dist(p_tier) - 200 then raise exception 'Нет такого цветка'; end if;
+  if sqrt((cx - 1000000) ^ 2 + (cy - 1000000) ^ 2) < _tier_dist(p_tier) - 200 then raise exception 'Нет такого цветка'; end if;
   select * into u from users where nickname = v for update;
   if u.last_collect_at > now() - interval '1.5 seconds' then raise exception 'Не так быстро'; end if;
   cap := _bag_cap(u.bag_level);
@@ -96,7 +96,7 @@ declare v text; u users; jars int;
 begin
   v := _auth(p_token);
   if not _move(v, p_x, p_y) then raise exception 'Слишком быстро летишь'; end if;
-  if sqrt((p_x - 500000)::float8 ^ 2 + (p_y - 500000)::float8 ^ 2) > 320 then raise exception 'Нужно быть у улья'; end if;
+  if sqrt((p_x - 1000000)::float8 ^ 2 + (p_y - 1000000)::float8 ^ 2) > 320 then raise exception 'Нужно быть у улья'; end if;
   select * into u from users where nickname = v for update;
   jars := u.pollen / 10;
   update users set honey = honey + jars, pollen = pollen - jars * 10 where nickname = v;
