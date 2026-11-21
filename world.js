@@ -40,8 +40,14 @@
 
   function biome(x, y) {
     const cont = fbm(x / 70000, y / 70000, 3, 7);
-    const e = fbm(x / 9000, y / 9000, 5, 1) * 0.65 + cont * 0.35;
-    const m = fbm(x / 5200 + 100, y / 5200, 4, 3);
+    let e = fbm(x / 9000, y / 9000, 5, 1) * 0.65 + cont * 0.35;
+    let m = fbm(x / 5200 + 100, y / 5200, 4, 3);
+    // вокруг улья (центр мира) всегда цветочная поляна
+    const hd = Math.hypot(x - WORLD / 2, y - WORLD / 2);
+    if (hd < 3000) {
+      const k = hd < 1200 ? 0 : (hd - 1200) / 1800, kk = k * k * (3 - 2 * k);
+      e = 0.52 + (e - 0.52) * kk; m = 0.5 + (m - 0.5) * kk;
+    }
     const f = fbm(x / 3600, y / 3600 + 50, 3, 5);
     let b;
     if (e < 0.40) b = B.DEEP;
@@ -296,6 +302,7 @@
         const wx = tx * TILE + 6 + hash(tx, ty, 43) * 20;
         const wy = ty * TILE + 6 + hash(tx, ty, 44) * 20;
         if (wx < 0 || wy < 0 || wx > WORLD || wy > WORLD) continue;
+        if (Math.hypot(wx - WORLD / 2, wy - WORLD / 2) < 340) continue;
         const info = biome(wx, wy);
         decorate(ctx, wx, wy, wx - x0, wy - y0, info, r, r2);
       }
@@ -341,17 +348,6 @@
   const keys = new Set();
   const stick = { on: false, ox: 0, oy: 0, dx: 0, dy: 0 };
 
-  function findSpawn() {
-    for (let r = 0; r < 60000; r += 400) {
-      for (let a = 0; a < 6.28; a += 0.5) {
-        const x = WORLD / 2 + Math.cos(a) * r, y = WORLD / 2 + Math.sin(a) * r;
-        const b = biome(x, y).b;
-        if (b === B.FLOWERS || b === B.MEADOW) return { x, y };
-      }
-    }
-    return { x: WORLD / 2, y: WORLD / 2 };
-  }
-
   // ---------- карта открытых мест (как в Террарии) ----------
   const EXP = 1024;
   let explored = new Set();
@@ -360,7 +356,6 @@
   }
   function saveState() {
     try {
-      localStorage.setItem("pchelki_pos", JSON.stringify({ x: player.x | 0, y: player.y | 0 }));
       const arr = [...explored]; if (arr.length > 30000) arr.splice(0, arr.length - 30000);
       localStorage.setItem("pchelki_explored", JSON.stringify(arr));
     } catch (e) {}
@@ -391,6 +386,329 @@
 
   // ---------- частицы пыльцы ----------
   const motes = Array.from({ length: 46 }, (_, i) => ({ x: Math.random(), y: Math.random(), s: 0.6 + Math.random() * 1.6, p: Math.random() * 6 }));
+
+  // ---------- улей и пыльца ----------
+  // Улей стоит в центре мира, это координаты 0 0. Пыльцевые цветы стоят по сетке 256 px.
+  const HX = WORLD / 2, HY = WORLD / 2, HIVE_R = 300, PCELL = 256;
+  const TIER_DIST = [0, 48000, 128000, 256000, 384000];   // с какого расстояния от улья встречается
+  const TIER_CHANCE = [1, 0.30, 0.16, 0.08, 0.04];
+  const TIER_MULT = [1, 2, 3, 5, 10];
+  const TIER_NAMES = ["Солнечник", "Лунный колокольчик", "Огненная лилия", "Хрустальная роза", "Радужный лотос"];
+  const TIER_GLOW = ["255,214,80", "150,180,255", "255,110,50", "130,235,255", "255,225,130"];
+  const BAG_CAPS = [100, 150, 225, 325, 450, 600, 800, 1000];
+  const pcache = new Map();
+
+  function pollenAt(gx, gy) {
+    const key = gx + "," + gy;
+    if (pcache.has(key)) return pcache.get(key);
+    let f = null;
+    if (hash(gx, gy, 77) < 0.33) {
+      const x = gx * PCELL + 40 + hash(gx, gy, 78) * (PCELL - 80);
+      const y = gy * PCELL + 40 + hash(gx, gy, 79) * (PCELL - 80);
+      if (x > 0 && y > 0 && x < WORLD && y < WORLD && Math.hypot(x - HX, y - HY) > HIVE_R + 40 && biome(x, y).b > B.SHALLOW) {
+        const d = Math.hypot(gx * PCELL + PCELL / 2 - HX, gy * PCELL + PCELL / 2 - HY);
+        const r = hash(gx, gy, 80);
+        let tier = 0;
+        for (let t = 4; t >= 1; t--) if (d >= TIER_DIST[t] && r < TIER_CHANCE[t]) { tier = t; break; }
+        f = { gx, gy, x, y, tier, key, ph: hash(gx, gy, 81) * 6.28 };
+      }
+    }
+    if (pcache.size > 6000) pcache.clear();
+    pcache.set(key, f);
+    return f;
+  }
+
+  function star(x, y, r) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
+    ctx.quadraticCurveTo(x, y, x - r, y); ctx.quadraticCurveTo(x, y, x, y - r); ctx.fill();
+  }
+
+  // Головки цветов рисуются в точке (0, 0)
+  const HEADS = [
+    // 0. Солнечник: большой жёлтый цветок
+    (t) => {
+      ctx.fillStyle = "#ffc93c";
+      for (let i = 0; i < 10; i++) { const a = i * 0.628; ctx.beginPath(); ctx.ellipse(Math.cos(a) * 9, Math.sin(a) * 9, 7, 3.6, a, 0, 6.283); ctx.fill(); }
+      ctx.fillStyle = "#ffe680";
+      for (let i = 0; i < 10; i++) { const a = i * 0.628 + 0.31; ctx.beginPath(); ctx.ellipse(Math.cos(a) * 6, Math.sin(a) * 6, 4.5, 2.4, a, 0, 6.283); ctx.fill(); }
+      ctx.fillStyle = "#e8801a"; ctx.beginPath(); ctx.arc(0, 0, 5, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#ffd75e";
+      for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(Math.cos(i * 1.26) * 2.5, Math.sin(i * 1.26) * 2.5, 0.9, 0, 6.283); ctx.fill(); }
+    },
+    // 1. Лунный колокольчик: три светящихся сиреневых колокольчика
+    (t) => {
+      ctx.strokeStyle = "#4f8f6a"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, 4); ctx.quadraticCurveTo(0, -10, 12, -8); ctx.moveTo(0, -4); ctx.quadraticCurveTo(-4, -12, -12, -8); ctx.stroke();
+      const bells = [[-12, -4], [0, 2], [12, -4]];
+      for (let i = 0; i < 3; i++) {
+        const [bx, by] = bells[i], sw = Math.sin(t * 2 + i) * 0.12;
+        ctx.save(); ctx.translate(bx, by); ctx.rotate(sw);
+        const g = ctx.createLinearGradient(0, -7, 0, 8); g.addColorStop(0, "#c9b6ff"); g.addColorStop(1, "#7f9dff");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(-5, -6); ctx.quadraticCurveTo(-5, 3, -8, 7);
+        ctx.quadraticCurveTo(0, 4, 8, 7); ctx.quadraticCurveTo(5, 3, 5, -6); ctx.quadraticCurveTo(0, -11, -5, -6); ctx.fill();
+        ctx.fillStyle = "#fff6c0"; ctx.beginPath(); ctx.arc(0, 7, 1.8, 0, 6.283); ctx.fill();
+        ctx.restore();
+      }
+    },
+    // 2. Огненная лилия: острые красно-оранжевые лепестки и тычинки
+    (t) => {
+      const g = ctx.createRadialGradient(0, 0, 1, 0, 0, 17); g.addColorStop(0, "#ffe14d"); g.addColorStop(0.5, "#ff7a1f"); g.addColorStop(1, "#e8262a");
+      ctx.fillStyle = g;
+      for (let i = 0; i < 6; i++) {
+        const a = i * 1.047 + Math.sin(t * 3 + i) * 0.05;
+        ctx.beginPath(); ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(Math.cos(a - 0.4) * 11, Math.sin(a - 0.4) * 11, Math.cos(a) * 17, Math.sin(a) * 17);
+        ctx.quadraticCurveTo(Math.cos(a + 0.4) * 11, Math.sin(a + 0.4) * 11, 0, 0); ctx.fill();
+      }
+      ctx.strokeStyle = "#7a2a10"; ctx.lineWidth = 1; ctx.fillStyle = "#3a1206";
+      for (let i = 0; i < 5; i++) {
+        const a = i * 1.256 + 0.3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * 8, Math.sin(a) * 8); ctx.stroke();
+        ctx.beginPath(); ctx.arc(Math.cos(a) * 8, Math.sin(a) * 8, 1.3, 0, 6.283); ctx.fill();
+      }
+    },
+    // 3. Хрустальная роза: прозрачные голубые кристаллы
+    (t) => {
+      for (let layer = 0; layer < 3; layer++) {
+        const r = 17 - layer * 5, n = 5, off = layer * 0.6;
+        ctx.fillStyle = ["rgba(120,220,255,0.85)", "rgba(170,240,255,0.9)", "rgba(230,252,255,0.95)"][layer];
+        ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1;
+        for (let i = 0; i < n; i++) {
+          const a = off + i * 1.2566;
+          const c = Math.cos(a), s = Math.sin(a), pc = Math.cos(a + 1.57), ps = Math.sin(a + 1.57);
+          ctx.beginPath(); ctx.moveTo(0, 0);
+          ctx.lineTo(c * r * 0.5 + pc * r * 0.28, s * r * 0.5 + ps * r * 0.28);
+          ctx.lineTo(c * r, s * r);
+          ctx.lineTo(c * r * 0.5 - pc * r * 0.28, s * r * 0.5 - ps * r * 0.28);
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      }
+      ctx.fillStyle = "#fff"; star(0, 0, 4 + Math.sin(t * 4) * 1.2);
+    },
+    // 4. Радужный лотос: переливается всеми цветами, золотое сияние
+    (t) => {
+      ctx.save(); ctx.rotate(t * 0.4);
+      ctx.fillStyle = "rgba(255,215,90,0.35)";
+      for (let i = 0; i < 8; i++) { ctx.rotate(0.785); ctx.fillRect(-1.2, 12, 2.4, 14); }
+      ctx.restore();
+      for (let i = 0; i < 8; i++) {
+        const a = i * 0.785;
+        ctx.fillStyle = `hsl(${(t * 70 + i * 45) % 360},90%,68%)`;
+        ctx.beginPath(); ctx.ellipse(Math.cos(a) * 11, Math.sin(a) * 11, 9, 4.5, a, 0, 6.283); ctx.fill();
+      }
+      ctx.fillStyle = "#fff0f6";
+      for (let i = 0; i < 6; i++) { const a = i * 1.047 + 0.5; ctx.beginPath(); ctx.ellipse(Math.cos(a) * 6, Math.sin(a) * 6, 5.5, 3, a, 0, 6.283); ctx.fill(); }
+      ctx.fillStyle = "#ffc93c"; ctx.beginPath(); ctx.arc(0, 0, 4, 0, 6.283); ctx.fill();
+    },
+  ];
+
+  function drawPollenFlower(f, sx, sy, t, empty) {
+    const glow = TIER_GLOW[f.tier];
+    const S = 1.55 + f.tier * 0.12;           // пыльцевые цветы крупнее обычных
+    if (!empty) {
+      const R = (46 + f.tier * 6) * S * 0.8, pulse = 0.5 + 0.2 * Math.sin(t * 2.5 + f.ph);
+      const hy = sy - 20 * S;
+      const g = ctx.createRadialGradient(sx, hy, 0, sx, hy, R);
+      g.addColorStop(0, `rgba(${glow},${pulse})`); g.addColorStop(0.45, `rgba(${glow},${pulse * 0.35})`); g.addColorStop(1, `rgba(${glow},0)`);
+      ctx.fillStyle = g; ctx.fillRect(sx - R, hy - R, R * 2, R * 2);
+      // светлое кольцо на земле
+      ctx.strokeStyle = `rgba(${glow},${0.35 + 0.25 * Math.sin(t * 3 + f.ph)})`; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.ellipse(sx, sy + 3, 20 * S * 0.7, 7 * S * 0.7, 0, 0, 6.283); ctx.stroke();
+    }
+    ctx.save();
+    ctx.translate(sx, sy); ctx.scale(S, S);
+    if (empty) ctx.globalAlpha = 0.4;
+    shadow(ctx, 0, 3, 11, 4);
+    ctx.strokeStyle = "#4f9a45"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(0, 3); ctx.quadraticCurveTo(-4, -8, 0, -18); ctx.stroke();
+    ctx.fillStyle = "#62b152";
+    ctx.beginPath(); ctx.ellipse(5, -5, 6, 2.6, -0.5, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-5, -9, 5, 2.3, 0.5, 0, 6.283); ctx.fill();
+    ctx.translate(0, -20);
+    ctx.rotate(Math.sin(t * 1.6 + f.ph) * 0.06);
+    if (empty) ctx.scale(0.7, 0.7);
+    HEADS[f.tier](t);
+    ctx.restore();
+    if (!empty) {
+      ctx.fillStyle = `rgba(${glow},0.95)`;
+      for (let i = 0; i < 2 + f.tier; i++) {
+        const a = t * (0.8 + i * 0.13) + f.ph + i * 2.1;
+        const rise = f.tier === 2 ? ((t * 18 + i * 13) % 34) * S : 0;
+        star(sx + Math.cos(a) * (16 + i * 3) * S, sy - 20 * S + Math.sin(a * 1.3) * 12 * S - rise, 2.6);
+      }
+    }
+  }
+
+  function drawHiveGround(sx, sy, t) {
+    ctx.fillStyle = "rgba(255,190,40,0.14)";
+    ctx.beginPath(); ctx.arc(sx, sy, HIVE_R, 0, 6.283); ctx.fill();
+    ctx.setLineDash([16, 12]); ctx.lineDashOffset = -t * 20;
+    ctx.strokeStyle = "rgba(255,170,0,0.75)"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  function drawHive(sx, sy, t) {
+    shadow(ctx, sx + 10, sy + 8, 100, 26);
+    ctx.fillStyle = "#9a6434"; ctx.strokeStyle = "#5c3a17"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(sx - 86, sy - 10, 172, 20, 7); ctx.fill(); ctx.stroke();
+    for (let i = 0; i < 6; i++) {
+      const w = 80 - i * 9 - i * i * 0.9, y = sy - 14 - i * 21;
+      ctx.fillStyle = i % 2 ? "#f2a93b" : "#f8c24f"; ctx.strokeStyle = "#8a5418"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(sx, y, w, 17, 0, 0, 6.283); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.beginPath(); ctx.ellipse(sx - w * 0.45, y - 5, w * 0.25, 4, -0.15, 0, 6.283); ctx.fill();
+    }
+    ctx.fillStyle = "#8a5418"; ctx.beginPath(); ctx.arc(sx, sy - 128, 9, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "#4a2a0c"; ctx.beginPath(); ctx.ellipse(sx, sy - 22, 17, 13, 0, Math.PI, 0); ctx.fill();
+    ctx.fillRect(sx - 17, sy - 22, 34, 8);
+    ctx.fillStyle = "#ffcf3a";
+    for (const [dx, dy, l] of [[-50, -50, 14], [38, -72, 10], [-24, -94, 8]]) {
+      const k = 1 + Math.sin(t * 1.5 + dx) * 0.15;
+      ctx.beginPath(); ctx.moveTo(sx + dx - 5, sy + dy); ctx.quadraticCurveTo(sx + dx - 5, sy + dy + l * k, sx + dx, sy + dy + l * k + 4);
+      ctx.quadraticCurveTo(sx + dx + 5, sy + dy + l * k, sx + dx + 5, sy + dy); ctx.fill();
+    }
+    // табличка
+    ctx.fillStyle = "#b07a45"; ctx.strokeStyle = "#5c3a17"; ctx.lineWidth = 2.5;
+    ctx.fillRect(sx + 88, sy - 30, 4, 34);
+    ctx.beginPath(); ctx.roundRect(sx + 62, sy - 54, 58, 26, 6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff4d6"; ctx.font = "800 13px Rubik, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("УЛЕЙ", sx + 91, sy - 36);
+    // пчёлки кружат вокруг
+    for (let i = 0; i < 4; i++) {
+      const a = t * 1.3 + i * 1.57, bx = sx + Math.cos(a) * 115, by = sy - 70 + Math.sin(a) * 45;
+      ctx.fillStyle = "rgba(220,240,255,0.8)"; ctx.beginPath(); ctx.ellipse(bx, by - 5, 3, 4 * Math.abs(Math.sin(t * 30 + i)) + 0.5, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#ffb703"; ctx.beginPath(); ctx.ellipse(bx, by, 6, 4.5, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#2b1d0e"; ctx.fillRect(bx - 1.5, by - 4, 2.5, 8);
+    }
+  }
+
+  // ---------- мини-игра сбора ----------
+  // По полоске бегает метка. Нужно 3 раза нажать, когда она в зелёной зоне. Чем реже цветок, тем быстрее.
+  let mg = null, near = null, busy = false, sellBusy = false, sellRetry = 0, posBusy = false, posT = 0, lastSaved = null;
+  let net = { sb: null, token: null }, user = null, onUser = null;
+  const taken = new Map();
+  const toasts = [];
+  const cleanErr = (e) => ((e && e.message) || "Ошибка").replace(/^.*?ERROR:\s*/, "");
+  const isTaken = (f) => (taken.get(f.key) || 0) > Date.now();
+  function setUser(u) { user = u; if (onUser) onUser(u); }
+  function toast(text, color, at) {
+    toasts.push({ text, color, x: at ? at.x : player.x, y: at ? at.y - 46 : player.y - 60, t0: performance.now() });
+  }
+
+  function action() {
+    if (mg) return mgPress();
+    if (!near || busy || !user) return;
+    if (user.pollen >= user.bag_cap) return toast("Мешочек полон! Лети в улей", "#ff9a6b");
+    const tier = near.tier;
+    mg = { f: near, hits: 0, need: 3, pos: 0, dir: 1, speed: 0.7 + tier * 0.16, zoneC: 0.3 + Math.random() * 0.4, zoneW: 0.26 - tier * 0.025, flash: 0 };
+  }
+  function mgPress() {
+    const hit = Math.abs(mg.pos - mg.zoneC) <= mg.zoneW / 2;
+    if (!hit) {
+      taken.set(mg.f.key, Date.now() + 8000);
+      toast("Промах! Цветок закрылся", "#ff9a6b", mg.f);
+      mg = null; return;
+    }
+    mg.hits++; mg.flash = performance.now();
+    if (mg.hits >= mg.need) { const f = mg.f; mg = null; collect(f); return; }
+    mg.speed *= 1.3; mg.zoneW *= 0.85; mg.zoneC = 0.15 + Math.random() * 0.7;
+  }
+  async function collect(f) {
+    if (!net.sb) return;
+    busy = true;
+    const { data, error } = await net.sb.rpc("collect_pollen", {
+      p_token: net.token, p_gx: f.gx, p_gy: f.gy, p_tier: f.tier, p_x: Math.round(player.x), p_y: Math.round(player.y),
+    });
+    busy = false;
+    if (error || !data) {
+      const m = cleanErr(error); toast(m, "#ff9a6b", f);
+      if (/пуст/.test(m)) taken.set(f.key, Date.now() + 300000);
+      return;
+    }
+    taken.set(f.key, Date.now() + 300000);
+    setUser(data.user);
+    toast(`+${data.got} пыльцы`, f.tier ? `rgb(${TIER_GLOW[f.tier]})` : "#ffe066", f);
+  }
+  async function sell() {
+    sellBusy = true;
+    const { data, error } = await net.sb.rpc("sell_pollen", { p_token: net.token, p_x: Math.round(player.x), p_y: Math.round(player.y) });
+    sellBusy = false;
+    if (error || !data) { sellRetry = performance.now() + 4000; toast(cleanErr(error), "#ff9a6b"); return; }
+    setUser(data.user);
+    if (data.jars > 0) toast(`+${data.jars} 🍯 мёда`, "#ffd23f");
+  }
+  async function upgrade() {
+    if (!net.sb || busy) return;
+    busy = true;
+    const { data, error } = await net.sb.rpc("upgrade_bag", { p_token: net.token });
+    busy = false;
+    if (error || !data) return toast(cleanErr(error), "#ff9a6b");
+    setUser(data);
+    toast(`Мешочек: ${data.bag_cap} пыльцы!`, "#9fe870");
+  }
+  async function savePos(force) {
+    if (!net.sb || posBusy) return;
+    const x = Math.round(player.x), y = Math.round(player.y);
+    if (!force && lastSaved && Math.abs(lastSaved.x - x) < 4 && Math.abs(lastSaved.y - y) < 4) return;
+    posBusy = true;
+    const { data } = await net.sb.rpc("save_pos", { p_token: net.token, p_x: x, p_y: y });
+    posBusy = false;
+    if (!data) return;
+    if (data.ok) lastSaved = { x, y };
+    else if (running) { player.x = data.x; player.y = data.y; player.vx = player.vy = 0; lastSaved = { x: data.x, y: data.y }; }
+  }
+
+  function drawMinigame(t) {
+    const pw = Math.min(380, W - 32), ph = 128, px = (W - pw) / 2, py = H - ph - 120;
+    ctx.fillStyle = "rgba(255,253,245,0.97)"; ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 18); ctx.fill(); ctx.stroke();
+    const f = mg.f;
+    ctx.fillStyle = "#2b1d0e"; ctx.font = "800 16px Rubik, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(TIER_NAMES[f.tier] + (f.tier ? `  ×${TIER_MULT[f.tier]}` : ""), W / 2, py + 26);
+    const bx = px + 22, bw = pw - 44, by = py + 42, bh = 26;
+    ctx.fillStyle = "#f0d98a"; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill();
+    ctx.fillStyle = performance.now() - mg.flash < 150 ? "#c8ff9a" : "#7bd36b";
+    ctx.beginPath(); ctx.roundRect(bx + (mg.zoneC - mg.zoneW / 2) * bw, by, mg.zoneW * bw, bh, 8); ctx.fill();
+    ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.stroke();
+    const mx = bx + mg.pos * bw;
+    ctx.fillStyle = "#2b1d0e"; ctx.fillRect(mx - 2.5, by - 6, 5, bh + 12);
+    ctx.beginPath(); ctx.moveTo(mx - 8, by - 12); ctx.lineTo(mx + 8, by - 12); ctx.lineTo(mx, by - 3); ctx.fill();
+    for (let i = 0; i < mg.need; i++) {
+      ctx.fillStyle = i < mg.hits ? "#ffb703" : "#e8dcc0";
+      ctx.beginPath(); ctx.arc(W / 2 + (i - 1) * 26, py + 90, 9, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 2; ctx.stroke();
+    }
+    ctx.fillStyle = "#7a6650"; ctx.font = "600 12px Rubik, sans-serif";
+    ctx.fillText("Жми ПРОБЕЛ или на экран, когда метка в зелёном", W / 2, py + 118);
+  }
+
+  function drawHiveHud(t) {
+    const d = Math.hypot(player.x - HX, player.y - HY);
+    const mmX = W - MM - 14, y0 = 14 + MM + 10;
+    ctx.fillStyle = "rgba(8,10,24,0.7)"; ctx.beginPath(); ctx.roundRect(mmX - 4, y0, MM + 8, 42, 10); ctx.fill();
+    ctx.textAlign = "left"; ctx.fillStyle = "#ffd166"; ctx.font = "800 13px Rubik, sans-serif";
+    ctx.fillText("🏠 Улей: X 0 · Y 0", mmX + 4, y0 + 17);
+    ctx.fillStyle = "#fff4d6"; ctx.font = "400 12px Rubik, sans-serif";
+    ctx.fillText(`до улья: ${Math.round(d / TILE)}`, mmX + 4, y0 + 34);
+    // стрелка к улью, если он за экраном
+    const sx = HX - player.x + W / 2, sy = HY - player.y + H / 2;
+    if (sx > -40 && sy > 0 && sx < W + 40 && sy < H + 140) return;
+    const a = Math.atan2(HY - player.y, HX - player.x);
+    const rx = W / 2 - 60, ry = H / 2 - 70;
+    const k = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
+    const ax = W / 2 + Math.cos(a) * k, ay = H / 2 + Math.sin(a) * k;
+    ctx.save(); ctx.translate(ax, ay);
+    ctx.fillStyle = "rgba(8,10,24,0.65)"; ctx.beginPath(); ctx.arc(0, 0, 22, 0, 6.283); ctx.fill();
+    ctx.rotate(a); ctx.fillStyle = "#ffb703";
+    ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = "#fff4d6"; ctx.font = "600 11px Rubik, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("🏠 " + Math.round(d / TILE), ax, ay + 36);
+  }
+
+  const $id = (id) => document.getElementById(id);
+  function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
+  function setShown(el, on) { if (el.hidden === on) el.hidden = !on; }
 
   // ---------- отрисовка ----------
   let canvas, ctx, dpr = 1, W = 0, H = 0, running = false, lastT = 0, saveT = 0, onExit = null;
@@ -427,6 +745,11 @@
       ctx.font = "600 13px Rubik, sans-serif"; ctx.textAlign = "center";
       ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.strokeText(nick, x, y - 34 + bob);
       ctx.fillStyle = me ? "#fff" : "#ffe08a"; ctx.fillText(nick, x, y - 34 + bob);
+    }
+    if (me && user) {
+      const k = Math.min(1, user.pollen / user.bag_cap);
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.beginPath(); ctx.roundRect(x - 18, y - 29 + bob, 36, 6, 3); ctx.fill();
+      ctx.fillStyle = k >= 1 ? "#ff7a5c" : "#ffd23f"; ctx.beginPath(); ctx.roundRect(x - 18, y - 29 + bob, 36 * k, 6, 3); ctx.fill();
     }
   }
 
@@ -488,6 +811,7 @@
     if (keys.has("w") || keys.has("arrowup") || keys.has("ц")) ay -= 1;
     if (keys.has("s") || keys.has("arrowdown") || keys.has("ы")) ay += 1;
     if (stick.on) { ax += stick.dx; ay += stick.dy; }
+    if (mg) { ax = 0; ay = 0; }
     const len = Math.hypot(ax, ay);
     if (len > 1) { ax /= len; ay /= len; }
     const speed = keys.has("shift") ? 620 : 340;
@@ -542,6 +866,36 @@
       ctx.beginPath(); ctx.arc(mx, my, m.s * 1.4, 0, Math.PI * 2); ctx.fill();
     }
 
+    // улей
+    const hsx = HX - camX, hsy = HY - camY;
+    const hiveOn = hsx > -400 && hsy > -400 && hsx < W + 400 && hsy < H + 400;
+    if (hiveOn) drawHiveGround(hsx, hsy, t);
+
+    // пыльцевые цветы
+    near = null;
+    let nearD = 62;
+    const g0x = Math.floor((camX - 60) / PCELL), g1x = Math.floor((camX + W + 60) / PCELL);
+    const g0y = Math.floor((camY - 60) / PCELL), g1y = Math.floor((camY + H + 80) / PCELL);
+    for (let gy = g0y; gy <= g1y; gy++) {
+      for (let gx = g0x; gx <= g1x; gx++) {
+        const f = pollenAt(gx, gy);
+        if (!f) continue;
+        const empty = isTaken(f);
+        drawPollenFlower(f, f.x - camX, f.y - camY, t, empty);
+        const d = Math.hypot(f.x - player.x, f.y - 14 - player.y);
+        if (!empty && d < nearD) { nearD = d; near = f; }
+      }
+    }
+    if (mg) {
+      mg.pos += mg.dir * mg.speed * dt;
+      if (mg.pos > 1) { mg.pos = 1; mg.dir = -1; } else if (mg.pos < 0) { mg.pos = 0; mg.dir = 1; }
+    }
+    if (hiveOn) drawHive(hsx, hsy, t);
+
+    // в улье пыльца сама превращается в мёд
+    const inHive = Math.hypot(player.x - HX, player.y - HY) < HIVE_R - 20;
+    if (inHive && net.sb && user && user.pollen >= 10 && !sellBusy && now > sellRetry) sell();
+
     // другие пчёлки
     netTick(t, dt);
     for (const [n, o] of others) {
@@ -550,6 +904,17 @@
       drawBee(sx, sy, t + n.length, o.face, n, false);
     }
     drawBee(W / 2, H / 2, t, player.face, player.nick, true);
+
+    ctx.textAlign = "center"; ctx.font = "800 16px Rubik, sans-serif";
+    for (let i = toasts.length - 1; i >= 0; i--) {
+      const tt = toasts[i], age = (now - tt.t0) / 1000;
+      if (age > 1.8) { toasts.splice(i, 1); continue; }
+      const sx = tt.x - camX, sy = tt.y - camY - age * 30;
+      ctx.globalAlpha = Math.min(1, (1.8 - age) * 2);
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.strokeText(tt.text, sx, sy);
+      ctx.fillStyle = tt.color; ctx.fillText(tt.text, sx, sy);
+    }
+    ctx.globalAlpha = 1;
 
     // мягкий солнечный свет
     const sun = ctx.createRadialGradient(W * 0.15, -H * 0.1, 0, W * 0.15, -H * 0.1, Math.max(W, H));
@@ -575,12 +940,29 @@
       const px = mmX + MM / 2 + (o.x - player.x) / MM_STEP, py = mmY + MM / 2 + (o.y - player.y) / MM_STEP;
       if (px > mmX && py > mmY && px < mmX + MM && py < mmY + MM) { ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2); ctx.fill(); }
     }
+    const hmx = mmX + MM / 2 + (HX - player.x) / MM_STEP, hmy = mmY + MM / 2 + (HY - player.y) / MM_STEP;
+    if (hmx > mmX && hmy > mmY && hmx < mmX + MM && hmy < mmY + MM) {
+      ctx.fillStyle = "#ffb703"; ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.rect(hmx - 4, hmy - 4, 8, 8); ctx.fill(); ctx.stroke();
+    }
     ctx.fillStyle = "#ffb703"; ctx.beginPath(); ctx.arc(mmX + MM / 2, mmY + MM / 2, 3, 0, Math.PI * 2); ctx.fill();
+    drawHiveHud(t);
+    if (mg) drawMinigame(t);
 
     // подписи
     const here = biome(player.x, player.y);
     document.getElementById("world-biome").textContent = NAMES[here.b];
-    document.getElementById("world-pos").textContent = `X ${(player.x / TILE) | 0} · Y ${(player.y / TILE) | 0}`;
+    setText($id("world-pos"), `X ${Math.round((player.x - HX) / TILE)} · Y ${Math.round((player.y - HY) / TILE)}`);
+    if (user) setText($id("world-bag"), `🎒 ${user.pollen}/${user.bag_cap} · 🍯 ${user.honey}`);
+    const act = $id("world-act");
+    if (mg) { setShown(act, true); setText(act, "Жми! 🐝"); }
+    else if (near && user) { setShown(act, true); setText(act, user.pollen >= user.bag_cap ? "Мешочек полон 🏠" : `🌼 Собрать: ${TIER_NAMES[near.tier]}`); }
+    else setShown(act, false);
+    const up = $id("world-upgrade");
+    setShown(up, inHive && !!user && !mg);
+    if (inHive && user) setText(up, user.bag_cost == null ? "Мешочек максимальный 🎒"
+      : `⬆ Мешочек ${user.bag_cap} → ${BAG_CAPS[user.bag_level]} за ${user.bag_cost} 🍯`);
+    if (t - posT > 2) { posT = t; savePos(false); }
     document.getElementById("world-online").textContent = `🐝 в игре: ${online}`;
 
     if (t - saveT > 3) { saveT = t; saveState(); }
@@ -592,9 +974,12 @@
     const k = e.key.toLowerCase();
     if (e.type === "keydown") { keys.add(k); if (k.startsWith("arrow") || k === " ") e.preventDefault(); }
     else keys.delete(k);
-    if (e.type === "keydown" && k === "escape") stop();
+    if (e.type !== "keydown" || e.repeat) return;
+    if (k === " " || k === "e" || k === "у") action();
+    if (k === "escape") { if (mg) mg = null; else stop(); }
   }
   function onDown(e) {
+    if (mg) { mgPress(); return; }
     stick.on = true; stick.ox = e.clientX; stick.oy = e.clientY; stick.dx = stick.dy = 0;
     canvas.setPointerCapture(e.pointerId);
   }
@@ -605,17 +990,23 @@
     stick.dx = (dx * k) / 60; stick.dy = (dy * k) / 60;
   }
   function onUp() { stick.on = false; stick.dx = stick.dy = 0; }
+  function onAct(e) { e.preventDefault(); action(); }
+  function onUpg(e) { e.preventDefault(); upgrade(); }
 
   function start(opts = {}) {
     canvas = document.getElementById("world");
     ctx = canvas.getContext("2d");
     player.nick = opts.nick || "";
     onExit = opts.onExit || null;
+    onUser = opts.onUser || null;
+    user = opts.user || null;
+    net = { sb: opts.sb || null, token: opts.token || null };
     loadExplored();
-    let pos = null;
-    try { pos = JSON.parse(localStorage.getItem("pchelki_pos") || "null"); } catch (e) {}
-    const p = pos && pos.x ? pos : findSpawn();
-    player.x = p.x; player.y = p.y; player.vx = player.vy = 0;
+    // первый раз: появляемся у улья (0 0), потом с того места, где вышли
+    if (user && user.pos_x != null) { player.x = user.pos_x; player.y = user.pos_y; }
+    else { player.x = HX; player.y = HY + 170; }
+    player.vx = player.vy = 0;
+    mg = null; near = null; lastSaved = null; posT = 0; toasts.length = 0;
     document.getElementById("world-wrap").classList.add("on");
     resize();
     window.addEventListener("resize", resize);
@@ -625,6 +1016,8 @@
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
+    $id("world-act").addEventListener("pointerdown", onAct);
+    $id("world-upgrade").addEventListener("pointerdown", onUpg);
     running = true; lastT = 0;
     netStart(opts.sb);
     requestAnimationFrame(frame);
@@ -634,6 +1027,11 @@
     if (!running) return;
     running = false;
     saveState();
+    savePos(true);
+    if (user) setUser({ ...user, pos_x: Math.round(player.x), pos_y: Math.round(player.y) });
+    mg = null;
+    $id("world-act").removeEventListener("pointerdown", onAct);
+    $id("world-upgrade").removeEventListener("pointerdown", onUpg);
     netStop();
     keys.clear(); onUp();
     window.removeEventListener("resize", resize);

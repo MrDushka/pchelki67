@@ -131,6 +131,15 @@ input:focus { border-color: var(--honey-dark); }
   background: rgba(8,10,24,.7); color: #fff4d6; font-size: .85rem;
 }
 .world-info b { font-size: 1rem; color: #ffd166; }
+.world-act, .world-upgrade {
+  position: fixed; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); white-space: nowrap;
+  font: 800 1.05rem "Rubik", sans-serif; padding: 14px 22px; border-radius: 16px; border: 3px solid #2b1d0e;
+  background: #ffb703; color: #2b1d0e; box-shadow: 0 4px 0 #2b1d0e; cursor: pointer; touch-action: manipulation;
+}
+.world-act { bottom: 52px; }
+.world-upgrade { bottom: 116px; background: #fffdf5; font-size: .95rem; }
+.world-act:active, .world-upgrade:active { transform: translate(-50%, 3px); box-shadow: 0 1px 0 #2b1d0e; }
+.world-act[hidden], .world-upgrade[hidden] { display: none; }
 .world-help {
   position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
   padding: 6px 12px; border-radius: 12px; background: rgba(8,10,24,.6); color: #fff4d6; font-size: .8rem; text-align: center;

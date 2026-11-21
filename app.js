@@ -115,7 +115,10 @@ $("#btn-journey").addEventListener("click", () => {
   window.BeeWorld.start({
     nick: user.nickname,
     sb,
-    onExit: () => { document.querySelector(".card").style.display = ""; },
+    token: sessionToken,
+    user,
+    onUser: (u) => { user = u; },
+    onExit: () => { document.querySelector(".card").style.display = ""; renderHome(); },
   });
 });
 $("#world-back").addEventListener("click", () => window.BeeWorld.stop());
