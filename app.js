@@ -114,6 +114,7 @@ $("#btn-journey").addEventListener("click", () => {
   document.querySelector(".card").style.display = "none";
   window.BeeWorld.start({
     nick: user.nickname,
+    sb,
     onExit: () => { document.querySelector(".card").style.display = ""; },
   });
 });

@@ -403,12 +403,12 @@
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
   }
 
-  function drawBee(x, y, t) {
+  function drawBee(x, y, t, face, nick, me) {
     const bob = Math.sin(t * 6) * 3;
     shadow(ctx, x, y + 22, 14, 5);
     ctx.save();
     ctx.translate(x, y + bob);
-    ctx.scale(player.face, 1);
+    ctx.scale(face, 1);
     const flap = Math.abs(Math.sin(t * 40));
     ctx.fillStyle = "rgba(210,240,255,0.85)"; ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.ellipse(-4, -14, 8, 11 * (0.5 + flap * 0.5), -0.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -424,10 +424,55 @@
     ctx.fillStyle = "#ff9ec7"; ctx.beginPath(); ctx.arc(12, 3, 2.2, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#2b1d0e"; ctx.beginPath(); ctx.moveTo(-17, 0); ctx.lineTo(-23, 2); ctx.lineTo(-17, 4); ctx.fill();
     ctx.restore();
-    if (player.nick) {
+    if (nick) {
       ctx.font = "600 13px Rubik, sans-serif"; ctx.textAlign = "center";
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.strokeText(player.nick, x, y - 34 + bob);
-      ctx.fillStyle = "#fff"; ctx.fillText(player.nick, x, y - 34 + bob);
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.strokeText(nick, x, y - 34 + bob);
+      ctx.fillStyle = me ? "#fff" : "#ffe08a"; ctx.fillText(nick, x, y - 34 + bob);
+    }
+  }
+
+  // ---------- мультиплеер (Supabase Realtime) ----------
+  // Каждый игрок 5 раз в секунду рассылает свою позицию, когда летит. Остальные плавно её догоняют.
+  const others = new Map(); // ник -> {x, y, tx, ty, face, seen}
+  let chan = null, sendT = 0, lastSent = null, online = 1;
+  function netStart(sb) {
+    if (!sb || !player.nick) return;
+    chan = sb.channel("world", { config: { broadcast: { self: false }, presence: { key: player.nick } } });
+    chan.on("broadcast", { event: "pos" }, ({ payload: p }) => {
+      if (!p || typeof p.n !== "string" || p.n === player.nick || !isFinite(p.x) || !isFinite(p.y)) return;
+      let o = others.get(p.n);
+      if (!o) { o = { x: p.x, y: p.y }; others.set(p.n, o); }
+      o.tx = p.x; o.ty = p.y; o.face = p.f === -1 ? -1 : 1; o.seen = performance.now();
+    });
+    chan.on("presence", { event: "sync" }, () => { online = Math.max(1, Object.keys(chan.presenceState()).length); });
+    chan.on("presence", { event: "leave" }, ({ key }) => others.delete(key));
+    // новичок спрашивает, кто где: все отвечают своей позицией
+    chan.on("broadcast", { event: "hello" }, () => sendPos(true));
+    chan.subscribe((st) => {
+      if (st !== "SUBSCRIBED" || !chan) return;
+      chan.track({ n: player.nick });
+      chan.send({ type: "broadcast", event: "hello", payload: {} });
+      sendPos(true);
+    });
+  }
+  function sendPos(force) {
+    if (!chan) return;
+    const x = Math.round(player.x), y = Math.round(player.y);
+    if (!force && lastSent && Math.abs(lastSent.x - x) < 2 && Math.abs(lastSent.y - y) < 2) return;
+    lastSent = { x, y };
+    chan.send({ type: "broadcast", event: "pos", payload: { n: player.nick, x, y, f: player.face } });
+  }
+  function netStop() {
+    if (chan) { const c = chan; chan = null; c.untrack(); c.unsubscribe(); }
+    others.clear(); online = 1; lastSent = null;
+  }
+  function netTick(t, dt) {
+    if (t - sendT > 0.2) { sendT = t; sendPos(false); }
+    const now = performance.now();
+    for (const [n, o] of others) {
+      if (now - o.seen > 15000) { others.delete(n); continue; }
+      o.x += (o.tx - o.x) * Math.min(1, dt * 8);
+      o.y += (o.ty - o.y) * Math.min(1, dt * 8);
     }
   }
 
@@ -497,7 +542,14 @@
       ctx.beginPath(); ctx.arc(mx, my, m.s * 1.4, 0, Math.PI * 2); ctx.fill();
     }
 
-    drawBee(W / 2, H / 2, t);
+    // другие пчёлки: дальние скрыты туманом
+    netTick(t, dt);
+    for (const [n, o] of others) {
+      const sx = o.x - camX, sy = o.y - camY;
+      if (sx < -60 || sy < -60 || sx > W + 60 || sy > H + 60) continue;
+      drawBee(sx, sy, t + n.length, o.face, n, false);
+    }
+    drawBee(W / 2, H / 2, t, player.face, player.nick, true);
 
     // мягкий солнечный свет
     const sun = ctx.createRadialGradient(W * 0.15, -H * 0.1, 0, W * 0.15, -H * 0.1, Math.max(W, H));
@@ -519,12 +571,18 @@
     ctx.drawImage(mmCanvas, mmX + (mmCenter.x - player.x) / MM_STEP, mmY + (mmCenter.y - player.y) / MM_STEP);
     ctx.restore();
     ctx.strokeStyle = "#ffb703"; ctx.lineWidth = 2; ctx.strokeRect(mmX - 4, mmY - 4, MM + 8, MM + 8);
+    ctx.fillStyle = "#fff";
+    for (const o of others.values()) {
+      const px = mmX + MM / 2 + (o.x - player.x) / MM_STEP, py = mmY + MM / 2 + (o.y - player.y) / MM_STEP;
+      if (px > mmX && py > mmY && px < mmX + MM && py < mmY + MM) { ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2); ctx.fill(); }
+    }
     ctx.fillStyle = "#ffb703"; ctx.beginPath(); ctx.arc(mmX + MM / 2, mmY + MM / 2, 3, 0, Math.PI * 2); ctx.fill();
 
     // подписи
     const here = biome(player.x, player.y);
     document.getElementById("world-biome").textContent = NAMES[here.b];
     document.getElementById("world-pos").textContent = `X ${(player.x / TILE) | 0} · Y ${(player.y / TILE) | 0}`;
+    document.getElementById("world-online").textContent = `🐝 в игре: ${online}`;
 
     if (t - saveT > 3) { saveT = t; saveState(); }
     requestAnimationFrame(frame);
@@ -569,6 +627,7 @@
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
     running = true; lastT = 0;
+    netStart(opts.sb);
     requestAnimationFrame(frame);
   }
 
@@ -576,6 +635,7 @@
     if (!running) return;
     running = false;
     saveState();
+    netStop();
     keys.clear(); onUp();
     window.removeEventListener("resize", resize);
     window.removeEventListener("keydown", onKey);

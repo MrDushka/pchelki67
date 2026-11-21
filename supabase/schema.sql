@@ -105,3 +105,22 @@ begin
   update users set respects_bees = p_respects where nickname = v;
   return public._user_json(v);
 end $$;
+
+-- ---------- админы, которые ещё не зарегистрировались ----------
+create table if not exists pending_admins (nick_lower text primary key);
+alter table pending_admins enable row level security;
+revoke all on pending_admins from anon, authenticated;
+insert into pending_admins values ('zzz31085') on conflict do nothing;
+
+create or replace function _grant_pending_admin() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from pending_admins where nick_lower = lower(new.nickname)) then
+    new.is_admin := true;
+  end if;
+  return new;
+end $$;
+revoke execute on function _grant_pending_admin() from public;
+drop trigger if exists trg_pending_admin on users;
+create trigger trg_pending_admin before insert on users
+for each row execute function _grant_pending_admin();
