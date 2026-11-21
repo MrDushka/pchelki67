@@ -710,6 +710,80 @@
   function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
   function setShown(el, on) { if (el.hidden === on) el.hidden = !on; }
 
+  // ---------- админ-панель ----------
+  // Кнопка видна только админам. Все действия проверяет сервер (admin_give, admin_teleport, admin_where).
+  let adminWired = false;
+  function admMsg(text, ok) { const el = $id("admin-msg"); el.textContent = text; el.className = "admin-msg " + (ok ? "ok" : "err"); }
+  function pingPlayer(ev, nick) { if (chan) chan.send({ type: "broadcast", event: ev, payload: { n: nick } }); }
+  function teleportLocal(x, y) { player.x = x; player.y = y; player.vx = player.vy = 0; lastSaved = { x, y }; mg = null; sendPos(true); }
+  function refreshOnline() {
+    const dl = $id("admin-online"); dl.innerHTML = "";
+    for (const n of [player.nick, ...others.keys()]) { const o = document.createElement("option"); o.value = n; dl.appendChild(o); }
+  }
+  function openAdmin(on) {
+    setShown($id("admin-panel"), on);
+    if (on) { refreshOnline(); keys.clear(); onUp(); }
+  }
+  async function adm(kind) {
+    if (!net.sb) return;
+    const rpc = (fn, args) => net.sb.rpc(fn, { p_token: net.token, ...args });
+    const nick = $id("admin-nick").value.trim();
+    if (["honey", "pollen", "bag", "goto", "bring"].includes(kind) && !nick) return admMsg("Впиши ник игрока");
+    admMsg("…", true);
+    try {
+      if (kind === "honey" || kind === "pollen" || kind === "bag") {
+        const v = kind === "bag" ? +$id("admin-bag").value : parseInt($id("admin-" + kind).value, 10);
+        if (!Number.isFinite(v) || (kind !== "bag" && v === 0)) return admMsg("Впиши число (минус — забрать)");
+        const r = await rpc("admin_give", { p_nick: nick, p_honey: kind === "honey" ? v : 0, p_pollen: kind === "pollen" ? v : 0, p_bag: kind === "bag" ? v : null });
+        if (r.error) return admMsg(cleanErr(r.error));
+        const u = r.data;
+        if (u.nickname === player.nick) setUser(u); else pingPlayer("refresh", u.nickname);
+        return admMsg(`${u.nickname}: 🍯 ${u.honey} · пыльца ${u.pollen}/${u.bag_cap} · мешочек ур. ${u.bag_level}`, true);
+      }
+      if (kind === "tp" || kind === "hive") {
+        const X = kind === "hive" ? 0 : parseInt($id("admin-x").value, 10);
+        const Y = kind === "hive" ? 0 : parseInt($id("admin-y").value, 10);
+        if (!Number.isFinite(X) || !Number.isFinite(Y)) return admMsg("Впиши X и Y");
+        const r = await rpc("admin_teleport", { p_nick: null, p_x: Math.round(HX + X * TILE), p_y: Math.round(HY + Y * TILE + (kind === "hive" ? 170 : 0)) });
+        if (r.error) return admMsg(cleanErr(r.error));
+        teleportLocal(r.data.x, r.data.y);
+        return admMsg(`Ты на X ${Math.round((r.data.x - HX) / TILE)} · Y ${Math.round((r.data.y - HY) / TILE)}`, true);
+      }
+      if (kind === "goto") {
+        let pos;
+        const o = [...others.entries()].find(([n]) => n.toLowerCase() === nick.toLowerCase());
+        if (o) pos = { x: Math.round(o[1].tx), y: Math.round(o[1].ty) };
+        else {
+          const w = await rpc("admin_where", { p_nick: nick });
+          if (w.error) return admMsg(cleanErr(w.error));
+          pos = w.data;
+        }
+        const r = await rpc("admin_teleport", { p_nick: null, p_x: pos.x + 70, p_y: pos.y });
+        if (r.error) return admMsg(cleanErr(r.error));
+        teleportLocal(r.data.x, r.data.y);
+        return admMsg(`Ты прилетел к ${o ? o[0] : pos.nick}`, true);
+      }
+      if (kind === "bring") {
+        const r = await rpc("admin_teleport", { p_nick: nick, p_x: Math.round(player.x) - 70, p_y: Math.round(player.y) });
+        if (r.error) return admMsg(cleanErr(r.error));
+        if (r.data.nick === player.nick) return admMsg("Это ты сам 🙂", true);
+        pingPlayer("tp", r.data.nick);
+        return admMsg(`${r.data.nick} перенесён к тебе`, true);
+      }
+    } catch (e) { admMsg("Ошибка сети"); }
+  }
+  function wireAdmin() {
+    if (adminWired) return;
+    adminWired = true;
+    const sel = $id("admin-bag");
+    BAG_CAPS.forEach((c, i) => { const o = document.createElement("option"); o.value = i + 1; o.textContent = `Ур. ${i + 1} (${c})`; sel.appendChild(o); });
+    $id("admin-btn").addEventListener("click", () => openAdmin($id("admin-panel").hidden));
+    $id("admin-close").addEventListener("click", () => openAdmin(false));
+    $id("admin-nick").addEventListener("focus", refreshOnline);
+    $id("admin-panel").addEventListener("click", (e) => { const b = e.target.closest("[data-adm]"); if (b) adm(b.dataset.adm); });
+    $id("admin-panel").addEventListener("keydown", (e) => { if (e.key === "Escape") openAdmin(false); });
+  }
+
   // ---------- отрисовка ----------
   let canvas, ctx, dpr = 1, W = 0, H = 0, running = false, lastT = 0, saveT = 0, onExit = null;
 
@@ -770,6 +844,14 @@
     chan.on("presence", { event: "leave" }, ({ key }) => others.delete(key));
     // новичок спрашивает, кто где: все отвечают своей позицией
     chan.on("broadcast", { event: "hello" }, () => sendPos(true));
+    // админ перенёс игрока: спрашиваем у сервера, где мы теперь (сервер сам вернёт новое место)
+    chan.on("broadcast", { event: "tp" }, ({ payload: p }) => { if (p && p.n === player.nick) savePos(true); });
+    // админ что-то выдал: перечитываем профиль
+    chan.on("broadcast", { event: "refresh" }, async ({ payload: p }) => {
+      if (!p || p.n !== player.nick || !net.sb) return;
+      const { data } = await net.sb.rpc("me", { p_token: net.token });
+      if (data) setUser(data);
+    });
     chan.subscribe((st) => {
       if (st !== "SUBSCRIBED" || !chan) return;
       chan.track({ n: player.nick });
@@ -971,12 +1053,13 @@
 
   // ---------- управление ----------
   function onKey(e) {
+    if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
     const k = e.key.toLowerCase();
     if (e.type === "keydown") { keys.add(k); if (k.startsWith("arrow") || k === " ") e.preventDefault(); }
     else keys.delete(k);
     if (e.type !== "keydown" || e.repeat) return;
     if (k === " " || k === "e" || k === "у") action();
-    if (k === "escape") { if (mg) mg = null; else stop(); }
+    if (k === "escape") { if (mg) mg = null; else if (!$id("admin-panel").hidden) openAdmin(false); else stop(); }
   }
   function onDown(e) {
     if (mg) { mgPress(); return; }
@@ -1018,6 +1101,9 @@
     canvas.addEventListener("pointercancel", onUp);
     $id("world-act").addEventListener("pointerdown", onAct);
     $id("world-upgrade").addEventListener("pointerdown", onUpg);
+    wireAdmin();
+    setShown($id("admin-btn"), !!(user && user.is_admin && net.sb));
+    openAdmin(false);
     running = true; lastT = 0;
     netStart(opts.sb);
     requestAnimationFrame(frame);
@@ -1032,6 +1118,7 @@
     mg = null;
     $id("world-act").removeEventListener("pointerdown", onAct);
     $id("world-upgrade").removeEventListener("pointerdown", onUpg);
+    openAdmin(false);
     netStop();
     keys.clear(); onUp();
     window.removeEventListener("resize", resize);

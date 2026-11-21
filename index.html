@@ -75,6 +75,22 @@
       <button class="world-back" id="world-back">← В улей</button>
       <div class="world-info"><b id="world-biome"></b><span id="world-pos"></span><span id="world-bag"></span><span id="world-online"></span></div>
     </div>
+    <button class="admin-btn" id="admin-btn" hidden>🛡 Админ</button>
+    <div class="admin-panel" id="admin-panel" hidden>
+      <div class="admin-head"><b>🛡 Админ-панель</b><button class="admin-x" id="admin-close" aria-label="Закрыть">✕</button></div>
+      <label class="admin-label">Игрок
+        <input id="admin-nick" list="admin-online" placeholder="ник игрока" autocomplete="off" maxlength="20">
+      </label>
+      <datalist id="admin-online"></datalist>
+      <div class="admin-sec">Выдать (минус — забрать)</div>
+      <div class="admin-row"><input id="admin-honey" type="number" placeholder="мёд 🍯"><button data-adm="honey">Выдать</button></div>
+      <div class="admin-row"><input id="admin-pollen" type="number" placeholder="пыльца"><button data-adm="pollen">Выдать</button></div>
+      <div class="admin-row"><select id="admin-bag"></select><button data-adm="bag">Поставить</button></div>
+      <div class="admin-sec">Телепорт</div>
+      <div class="admin-row"><input id="admin-x" type="number" placeholder="X"><input id="admin-y" type="number" placeholder="Y"><button data-adm="tp">Лететь</button></div>
+      <div class="admin-row admin-wrap"><button data-adm="hive">🏠 К улью</button><button data-adm="goto">К игроку</button><button data-adm="bring">Игрока ко мне</button></div>
+      <p class="admin-msg" id="admin-msg" role="status"></p>
+    </div>
     <button class="world-upgrade" id="world-upgrade" tabindex="-1" hidden></button>
     <button class="world-act" id="world-act" tabindex="-1" hidden></button>
     <div class="world-help">WASD: лететь · Shift: быстрее · E или пробел: собрать пыльцу · на телефоне веди пальцем</div>
