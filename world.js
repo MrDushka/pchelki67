@@ -1,13 +1,12 @@
 // Пчёлки 67: мир 1 000 000 × 1 000 000 пикселей.
 // Мир не хранится целиком: каждый кусок (чанк) рисуется на лету из шума по одному и тому же зерну,
-// поэтому у всех игроков одинаковая карта. Видно только то, что рядом с пчёлкой.
+// поэтому у всех игроков одинаковая карта.
 (() => {
   const WORLD = 1_000_000;
   const CHUNK = 512;       // размер чанка в пикселях
   const CELL = 16;         // шаг заливки земли
   const TILE = 32;         // шаг расстановки растений
   const SEED = 67;
-  const VISION = 380;      // радиус зрения
   const MAX_CHUNKS = 160;
 
   // ---------- шум ----------
@@ -497,7 +496,8 @@
     player.x = Math.max(0, Math.min(WORLD, player.x + player.vx * dt));
     player.y = Math.max(0, Math.min(WORLD, player.y + player.vy * dt));
     if (Math.abs(player.vx) > 20) player.face = player.vx > 0 ? 1 : -1;
-    explored.add(((player.x / EXP) | 0) + "," + ((player.y / EXP) | 0));
+    for (let ex = ((player.x - W / 2) / EXP) | 0; ex <= ((player.x + W / 2) / EXP) | 0; ex++)
+      for (let ey = ((player.y - H / 2) / EXP) | 0; ey <= ((player.y + H / 2) / EXP) | 0; ey++) explored.add(ex + "," + ey);
 
     const camX = player.x - W / 2, camY = player.y - H / 2;
     const now = performance.now();
@@ -542,7 +542,7 @@
       ctx.beginPath(); ctx.arc(mx, my, m.s * 1.4, 0, Math.PI * 2); ctx.fill();
     }
 
-    // другие пчёлки: дальние скрыты туманом
+    // другие пчёлки
     netTick(t, dt);
     for (const [n, o] of others) {
       const sx = o.x - camX, sy = o.y - camY;
@@ -556,11 +556,10 @@
     sun.addColorStop(0, "rgba(255,236,170,0.28)"); sun.addColorStop(1, "rgba(255,236,170,0)");
     ctx.fillStyle = sun; ctx.fillRect(0, 0, W, H);
 
-    // ограниченное зрение
-    const vr = VISION * (1 + Math.sin(t * 1.3) * 0.01);
-    const fog = ctx.createRadialGradient(W / 2, H / 2, vr * 0.45, W / 2, H / 2, vr);
-    fog.addColorStop(0, "rgba(8,10,24,0)"); fog.addColorStop(0.7, "rgba(8,10,24,0.55)"); fog.addColorStop(1, "rgba(8,10,24,0.97)");
-    ctx.fillStyle = fog; ctx.fillRect(0, 0, W, H);
+    // лёгкое затемнение по краям экрана, весь экран видно
+    const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.45, W / 2, H / 2, Math.hypot(W, H) / 2);
+    vig.addColorStop(0, "rgba(20,30,40,0)"); vig.addColorStop(1, "rgba(20,30,40,0.18)");
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
 
     // мини-карта
     pumpMinimap(3);
