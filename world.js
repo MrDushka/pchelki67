@@ -1112,11 +1112,11 @@
   }
 
   // Мини-игра «Поймай пыльцу». В окошке появляются пылинки, их надо поймать, пока не исчезли.
-  // Мышкой или пальцем: жми на пылинку (маленькая пчёлка летит туда). На клавиатуре: веди пчёлку WASD/стрелками.
+  // Мышкой или пальцем: жми, куда лететь маленькой пчёлке. На клавиатуре: веди пчёлку WASD/стрелками.
   // Осы летят к пчёлке: коснёшься осы — цветок закроется. Чем реже цветок, тем больше пыльцы ловить и тем больше ос.
   let mgDown = false;
   function startCatch(f) {
-    mg = { f, need: 5 + f.tier, got: 0, time: 0, dur: 9 + f.tier * 0.8, spawnT: 0.2, items: [], pops: [], bx: 0.5, by: 0.55, tx: null, ty: null, face: 1 };
+    mg = { f, need: 8 + f.tier, got: 0, time: 0, dur: 7 + f.tier * 0.9, spawnT: 0.2, items: [], pops: [], bx: 0.5, by: 0.55, tx: null, ty: null, face: 1 };
   }
   function mgRect() {
     const w = Math.min(400, W - 24), h = Math.min(300, Math.max(220, H - 230));
@@ -1143,11 +1143,11 @@
     if (keys.has("s") || keys.has("arrowdown") || keys.has("ы")) ky += 1;
     if (kx || ky) {
       mg.tx = null;
-      const l = Math.hypot(kx, ky), sp = 330 * dt;
+      const l = Math.hypot(kx, ky), sp = 300 * dt;
       mg.bx += (kx / l) * sp / A.w; mg.by += (ky / l) * sp / A.h;
       if (kx) mg.face = kx > 0 ? 1 : -1;
     } else if (mg.tx != null) {
-      const dx = (mg.tx - mg.bx) * A.w, dy = (mg.ty - mg.by) * A.h, d = Math.hypot(dx, dy), step = 700 * dt;
+      const dx = (mg.tx - mg.bx) * A.w, dy = (mg.ty - mg.by) * A.h, d = Math.hypot(dx, dy), step = 520 * dt;
       if (Math.abs(dx) > 2) mg.face = dx > 0 ? 1 : -1;
       if (d <= step) { mg.bx = mg.tx; mg.by = mg.ty; mg.tx = null; }
       else { mg.bx += (dx / d) * step / A.w; mg.by += (dy / d) * step / A.h; }
@@ -1155,22 +1155,22 @@
     mg.bx = Math.max(0.04, Math.min(0.96, mg.bx)); mg.by = Math.max(0.06, Math.min(0.94, mg.by));
     // новые пылинки и осы
     mg.spawnT -= dt;
-    if (mg.spawnT <= 0 && mg.items.length < 4) {
-      mg.spawnT = 0.55 - tier * 0.05;
+    if (mg.spawnT <= 0 && mg.items.length < 5) {
+      mg.spawnT = 0.42 - tier * 0.03;
       const wasps = mg.items.filter((i) => i.wasp).length;
-      const wasp = tier >= 1 && wasps < (tier >= 3 ? 2 : 1) && Math.random() < 0.14 + tier * 0.06;
+      const wasp = wasps < (tier >= 3 ? 2 : 1) && Math.random() < 0.3 + tier * 0.06;
       let x, y, tries = 0;
       do { x = 0.08 + Math.random() * 0.84; y = 0.1 + Math.random() * 0.8; }
       while (++tries < 8 && Math.hypot((x - mg.bx) * A.w, (y - mg.by) * A.h) < (wasp ? 120 : 50));
-      const sp = 0.12 + tier * 0.07;
-      mg.items.push({ x, y, age: 0, life: wasp ? 2.6 : 2.0 - tier * 0.2, wasp, vx: (Math.random() - 0.5) * sp, vy: (Math.random() - 0.5) * sp, ph: Math.random() * 6 });
+      const sp = 0.4 + tier * 0.1;
+      mg.items.push({ x, y, age: 0, life: wasp ? 3.2 : Math.max(0.7, 1.15 - tier * 0.1), wasp, vx: (Math.random() - 0.5) * sp, vy: (Math.random() - 0.5) * sp, ph: Math.random() * 6 });
     }
     for (let i = mg.items.length - 1; i >= 0; i--) {
       const it = mg.items[i];
       it.age += dt;
       if (it.wasp) {            // оса медленно летит к пчёлке
-        const k = dt * (0.35 + tier * 0.08);
-        it.x += (mg.bx - it.x) * k; it.y += (mg.by - it.y) * k;
+        const dx = (mg.bx - it.x) * A.w, dy = (mg.by - it.y) * A.h, d = Math.hypot(dx, dy) || 1, v = (90 + tier * 8) * dt;
+        it.x += (dx / d) * v / A.w; it.y += (dy / d) * v / A.h;
       } else {
         it.x += it.vx * dt; it.y += it.vy * dt;
         if (it.x < 0.05 || it.x > 0.95) it.vx *= -1;
@@ -1178,8 +1178,8 @@
       }
       if (it.age > it.life) { mg.items.splice(i, 1); continue; }
       const d = Math.hypot((it.x - mg.bx) * A.w, (it.y - mg.by) * A.h);
-      if (it.wasp && d < 18) return mgFail("Ой! Ужалила оса");
-      if (!it.wasp && d < 24) { catchItem(i); if (!mg) return; }
+      if (it.wasp && d < 20) return mgFail("Ой! Ужалила оса");
+      if (!it.wasp && d < 17) { catchItem(i); if (!mg) return; }
     }
     for (let i = mg.pops.length - 1; i >= 0; i--) { mg.pops[i].age += dt; if (mg.pops[i].age > 0.5) mg.pops.splice(i, 1); }
   }
@@ -1187,16 +1187,7 @@
     const A = arena(mgRect());
     const u = (e.clientX - A.x) / A.w, v = (e.clientY - A.y) / A.h;
     if (u < -0.05 || v < -0.05 || u > 1.05 || v > 1.05) return;
-    if (e.type === "pointerdown") {
-      for (let i = mg.items.length - 1; i >= 0; i--) {
-        const it = mg.items[i];
-        if (Math.hypot((it.x - u) * A.w, (it.y - v) * A.h) < 26) {
-          if (it.wasp) return mgFail("Ой! Ужалила оса");
-          mg.tx = it.x; mg.ty = it.y;
-          catchItem(i); return;
-        }
-      }
-    }
+    // пчёлка летит туда, куда нажал; ловит только своим телом
     mg.tx = Math.max(0, Math.min(1, u)); mg.ty = Math.max(0, Math.min(1, v));
   }
 
@@ -1253,7 +1244,7 @@
       const fade = Math.min(1, (it.life - it.age) / 0.45), grow = Math.min(1, it.age / 0.15);
       ctx.globalAlpha = Math.max(0, fade);
       if (it.wasp) { drawWasp(x, y, t + it.ph); ctx.globalAlpha = 1; continue; }
-      const r = 12 * grow * (1 + Math.sin(t * 8 + it.ph) * 0.08);
+      const r = 9 * grow * (1 + Math.sin(t * 8 + it.ph) * 0.08);
       const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.6); g.addColorStop(0, `rgba(${glow},0.7)`); g.addColorStop(1, `rgba(${glow},0)`);
       ctx.fillStyle = g; ctx.fillRect(x - r * 2.6, y - r * 2.6, r * 5.2, r * 5.2);
       ctx.fillStyle = f.tier ? `rgb(${glow})` : "#ffcf3a";
@@ -1273,7 +1264,7 @@
     ctx.restore();
     ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(A.x, A.y, A.w, A.h, 12); ctx.stroke();
     ctx.fillStyle = "#7a6650"; ctx.font = "600 12px Rubik, sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("Жми на пыльцу или веди пчёлку WASD · не трогай ос!", W / 2, R.y + R.h - 10);
+    ctx.fillText("Веди пчёлку к пыльце: жми мышкой/пальцем или WASD · не трогай ос!", W / 2, R.y + R.h - 10);
   }
 
   function drawHiveHud(t) {
