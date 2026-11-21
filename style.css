@@ -104,7 +104,15 @@ input:focus { border-color: var(--honey-dark); }
 .btn-login { background: var(--card); color: var(--ink); }
 .hint { color: var(--muted); font-size: .85rem; margin: 14px 0 0; }
 
-.stats { display: flex; gap: 12px; margin: 12px 0 16px; }
+.answers { display: flex; gap: 12px; position: relative; min-height: 64px; }
+.answers .btn { flex: 1; }
+.btn-no { background: var(--card); color: var(--ink); transition: transform .2s; }
+.journey { font-size: 1.7rem; line-height: 1.2; }
+.btn-big { font-size: 1.25rem; padding: 18px; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.03); } }
+.small { font-size: .85rem; margin: 0; }
+
+.stats { display: flex; gap: 12px; margin: 16px 0 12px; }
 .stats div { flex: 1; border: 3px solid var(--ink); border-radius: 16px; padding: 10px; background: var(--bg); }
 .stats span { display: block; font-size: 1.6rem; font-weight: 800; }
 .stats small { color: var(--muted); }

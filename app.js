@@ -49,16 +49,72 @@ function onLoggedIn(data) {
   saveToken(sessionToken);
   $("#password").value = "";
   say("");
-  renderHome();
+  next();
 }
 
-// ---------- улей ----------
+// После входа: если ещё не отвечал на вопрос, спрашиваем, иначе сразу путешествие.
+function next() {
+  if (user.respects_bees === null || user.respects_bees === undefined) askQuestion();
+  else renderHome();
+}
+
+// ---------- вопрос «Вы пчёлок уважаете?» ----------
+let dodges = 0;
+const noBtn = $("#btn-no");
+
+function askQuestion() {
+  dodges = 0;
+  noBtn.style.transform = "";
+  $("#question-msg").textContent = "";
+  show("question");
+}
+
+async function answer(respects) {
+  const { data, error } = await sb.rpc("set_respect", { p_token: sessionToken, p_respects: respects });
+  if (error || !data) {
+    $("#question-msg").textContent = cleanError(error);
+    $("#question-msg").className = "msg error";
+    return;
+  }
+  user = data;
+  renderHome();
+}
+$("#btn-yes").addEventListener("click", () => answer(true));
+
+// Кнопка «Нет» убегает. На пятый раз сдаётся.
+function dodge() {
+  if (dodges >= 5) return;
+  dodges++;
+  const x = (Math.random() - 0.5) * 160;
+  const y = (Math.random() - 0.5) * 80;
+  noBtn.style.transform = `translate(${x}px, ${y}px)`;
+  const lines = ["Вы уверены?", "Пчёлки обидятся…", "Подумайте ещё", "Ну пожалуйста 🥺", "Ладно, жмите…"];
+  $("#question-msg").textContent = lines[dodges - 1];
+  $("#question-msg").className = "msg";
+}
+noBtn.addEventListener("pointerenter", dodge);
+noBtn.addEventListener("click", (e) => {
+  if (dodges < 5) { e.preventDefault(); return dodge(); }
+  answer(false);
+});
+
+// ---------- путешествие ----------
 function renderHome() {
   $("#home-nick").textContent = user.nickname;
   $("#home-honey").textContent = user.honey;
   $("#home-wins").textContent = user.wins;
+  $("#home-respect").textContent = user.respects_bees
+    ? "Вы уважаете пчёлок. Пчёлки уважают вас 🐝"
+    : "Вы не уважаете пчёлок. Они это запомнили 😠";
+  $("#journey-msg").textContent = "";
   show("home");
 }
+
+$("#btn-journey").addEventListener("click", () => {
+  const m = $("#journey-msg");
+  m.textContent = "Пчёлки готовят улей к боям. Путешествие откроется совсем скоро!";
+  m.className = "msg ok";
+});
 
 $("#btn-logout").addEventListener("click", () => {
   if (sessionToken) sb.rpc("logout", { p_token: sessionToken });
@@ -74,10 +130,11 @@ $("#btn-logout").addEventListener("click", () => {
   const tk = readToken();
   if (tk) {
     const { data, error } = await sb.rpc("me", { p_token: tk });
+    if (sessionToken) return; // пока проверяли, игрок уже вошёл заново
     if (!error && data) {
       sessionToken = tk;
       user = data;
-      return renderHome();
+      return next();
     }
     saveToken(null);
   }

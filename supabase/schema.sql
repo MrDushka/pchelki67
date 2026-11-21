@@ -85,3 +85,23 @@ language sql security definer set search_path = public as $$
 $$;
 
 revoke execute on function public._auth(uuid), public._user_json(text) from public, anon, authenticated;
+
+-- ===== Вопрос «Вы пчёлок уважаете?» =====
+alter table public.users add column if not exists respects_bees boolean;
+
+create or replace function public._user_json(p_nick text) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('nickname', nickname, 'honey', honey, 'wins', wins, 'is_admin', is_admin,
+                            'respects_bees', respects_bees)
+  from users where nickname = p_nick;
+$$;
+revoke execute on function public._user_json(text) from public, anon, authenticated;
+
+create or replace function public.set_respect(p_token uuid, p_respects boolean) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v text;
+begin
+  v := public._auth(p_token);
+  update users set respects_bees = p_respects where nickname = v;
+  return public._user_json(v);
+end $$;
