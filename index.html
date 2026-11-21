@@ -72,7 +72,8 @@
   <div id="world-wrap">
     <canvas id="world"></canvas>
     <div class="world-hud">
-      <button class="world-back" id="world-back">← В улей</button>
+      <button class="world-back" id="world-back">← Меню</button>
+      <button class="world-back world-tp" id="world-tp" tabindex="-1">🏠 В улей</button>
       <div class="world-info"><b id="world-biome"></b><span id="world-pos"></span><span id="world-bag"></span><span id="world-online"></span></div>
     </div>
     <button class="admin-btn" id="admin-btn" hidden>🛡 Админ</button>
@@ -93,7 +94,7 @@
     </div>
     <button class="world-upgrade" id="world-upgrade" tabindex="-1" hidden></button>
     <button class="world-act" id="world-act" tabindex="-1" hidden></button>
-    <div class="world-help">WASD: лететь · Shift: быстрее · E или пробел: собрать пыльцу · на телефоне веди пальцем</div>
+    <div class="world-help">WASD: лететь · Shift: быстрее · E или пробел: собрать пыльцу · H: телепорт в улей · на телефоне веди пальцем</div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>

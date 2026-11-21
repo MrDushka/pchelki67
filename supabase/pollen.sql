@@ -122,3 +122,20 @@ grant execute on function save_pos(uuid, int, int) to anon, authenticated;
 grant execute on function collect_pollen(uuid, int, int, int, int, int) to anon, authenticated;
 grant execute on function sell_pollen(uuid, int, int) to anon, authenticated;
 grant execute on function upgrade_bag(uuid) to anon, authenticated;
+
+-- Телепорт любого игрока к общему улью (0 0). Раз в 60 секунд.
+alter table users add column if not exists last_tp_at timestamptz;
+create or replace function teleport_home(p_token uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v text; u users; wait int;
+begin
+  v := _auth(p_token);
+  select * into u from users where nickname = v for update;
+  if u.last_tp_at > now() - interval '60 seconds' then
+    wait := ceil(60 - extract(epoch from now() - u.last_tp_at));
+    raise exception 'Телепорт будет через % сек', wait;
+  end if;
+  update users set pos_x = 1000000, pos_y = 1000170, pos_at = now(), last_tp_at = now() where nickname = v;
+  return jsonb_build_object('x', 1000000, 'y', 1000170);
+end $$;
+grant execute on function teleport_home(uuid) to anon, authenticated;

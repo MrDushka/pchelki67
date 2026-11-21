@@ -1099,6 +1099,25 @@
     setUser(data);
     toast(`Мешочек: ${data.bag_cap} пыльцы!`, "#9fe870");
   }
+  // телепорт к общему улью: для всех игроков, раз в 60 секунд (проверяет сервер)
+  let tpReady = 0, tpBusy = false;
+  async function teleportHome() {
+    if (!net.sb || tpBusy) return;
+    if (Date.now() < tpReady) return toast(`Телепорт будет через ${Math.ceil((tpReady - Date.now()) / 1000)} сек`, "#ff9a6b");
+    tpBusy = true;
+    const { data, error } = await net.sb.rpc("teleport_home", { p_token: net.token });
+    tpBusy = false;
+    if (error || !data) {
+      const m = cleanErr(error), sec = /через (\d+)/.exec(m);
+      if (sec) tpReady = Date.now() + +sec[1] * 1000;
+      return toast(m, "#ff9a6b");
+    }
+    tpReady = Date.now() + 60000;
+    mg = null;
+    player.x = data.x; player.y = data.y; player.vx = player.vy = 0; lastSaved = { x: data.x, y: data.y };
+    sendPos(true);
+    toast("Ты дома! 🏠", "#ffd23f");
+  }
   async function savePos(force) {
     if (!net.sb || posBusy) return;
     const x = Math.round(player.x), y = Math.round(player.y);
@@ -1625,6 +1644,9 @@
     if (mg) { setShown(act, true); setText(act, "✖ Отмена"); }
     else if (near && user) { setShown(act, true); setText(act, user.pollen >= user.bag_cap ? "Мешочек полон 🏠" : `🌼 Собрать: ${TIER_NAMES[near.tier]}`); }
     else setShown(act, false);
+    const tpb = $id("world-tp"), tpLeft = Math.ceil((tpReady - Date.now()) / 1000);
+    setText(tpb, tpLeft > 0 ? `🏠 В улей (${tpLeft})` : "🏠 В улей");
+    tpb.disabled = tpLeft > 0 || !net.sb;
     const up = $id("world-upgrade");
     setShown(up, inHive && !!user && !mg);
     if (inHive && user) setText(up, user.bag_cost == null ? "Мешочек максимальный 🎒"
@@ -1644,6 +1666,7 @@
     else keys.delete(k);
     if (e.type !== "keydown" || e.repeat) return;
     if (k === " " || k === "e" || k === "у") action();
+    if (k === "h" || k === "р") teleportHome();
     if (k === "escape") { if (mg) mg = null; else if (!$id("admin-panel").hidden) openAdmin(false); else stop(); }
   }
   function onDown(e) {
@@ -1661,6 +1684,7 @@
   function onUp() { stick.on = false; stick.dx = stick.dy = 0; mgDown = false; }
   function onAct(e) { e.preventDefault(); if (mg) mg = null; else action(); }
   function onUpg(e) { e.preventDefault(); upgrade(); }
+  function onTp(e) { e.preventDefault(); teleportHome(); }
 
   function start(opts = {}) {
     canvas = document.getElementById("world");
@@ -1687,6 +1711,7 @@
     canvas.addEventListener("pointercancel", onUp);
     $id("world-act").addEventListener("pointerdown", onAct);
     $id("world-upgrade").addEventListener("pointerdown", onUpg);
+    $id("world-tp").addEventListener("pointerdown", onTp);
     wireAdmin();
     setShown($id("admin-btn"), !!(user && user.is_admin && net.sb));
     openAdmin(false);
@@ -1704,6 +1729,7 @@
     mg = null;
     $id("world-act").removeEventListener("pointerdown", onAct);
     $id("world-upgrade").removeEventListener("pointerdown", onUpg);
+    $id("world-tp").removeEventListener("pointerdown", onTp);
     openAdmin(false);
     netStop();
     keys.clear(); onUp();

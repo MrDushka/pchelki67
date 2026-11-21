@@ -126,6 +126,8 @@ input:focus { border-color: var(--honey-dark); }
   font: 800 .95rem "Rubik", sans-serif; padding: 10px 14px; border-radius: 14px;
   border: 3px solid #2b1d0e; background: #ffb703; color: #2b1d0e; box-shadow: 0 3px 0 #2b1d0e; cursor: pointer;
 }
+.world-tp { background: #fffdf5; }
+.world-tp:disabled { opacity: .6; cursor: default; }
 .world-info {
   display: flex; flex-direction: column; padding: 6px 12px; border-radius: 12px;
   background: rgba(8,10,24,.7); color: #fff4d6; font-size: .85rem;
