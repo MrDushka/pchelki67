@@ -169,6 +169,71 @@ input:focus { border-color: var(--honey-dark); }
 .admin-wrap button { flex: 1; }
 .admin-msg { margin: 2px 0 0; min-height: 1.2em; font-size: .85rem; font-weight: 600; }
 .admin-msg.ok { color: #3f7d20; } .admin-msg.err { color: #c2410c; }
+/* Улей изнутри */
+.hive-room[hidden], .hive-shop[hidden] { display: none; }
+.hive-room {
+  position: fixed; inset: 0; z-index: 8; overflow-y: auto; color: #2b1d0e; font-family: "Rubik", sans-serif;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255,220,120,.55), transparent 60%),
+    repeating-linear-gradient(60deg, rgba(160,100,20,.07) 0 2px, transparent 2px 26px),
+    repeating-linear-gradient(-60deg, rgba(160,100,20,.07) 0 2px, transparent 2px 26px),
+    linear-gradient(#f7c85a, #e59a2c);
+  display: flex; flex-direction: column; align-items: center; padding: 14px 12px 24px;
+}
+.hive-inner { width: min(560px, 100%); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.hive-top { width: 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hive-title { font-size: 1.4rem; font-weight: 800; flex: 1; text-align: center; }
+.hive-stats { display: flex; gap: 6px; }
+.hive-stats span { background: #fffdf5; border: 3px solid #2b1d0e; border-radius: 12px; padding: 6px 10px; font-weight: 800; }
+.hive-tip { margin: 0; text-align: center; font-weight: 600; color: #5c3a17; }
+.hive-comb { position: relative; margin: 6px 0; }
+.hive-comb .cell {
+  position: absolute; border: 0; padding: 0; cursor: pointer; overflow: hidden;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: #8a5418; display: flex; align-items: center; justify-content: center;
+  font: 800 .95rem "Rubik", sans-serif; color: #fff4d6; transition: transform .1s;
+}
+.hive-comb .cell::before {
+  content: ""; position: absolute; inset: 4px; background: #b77a2c;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.hive-comb .cell .fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+  background: linear-gradient(#ffd75e, #ff9f1a); transition: height .25s linear;
+}
+.hive-comb .cell .lbl { position: relative; z-index: 1; text-shadow: 0 1px 2px rgba(0,0,0,.45); }
+.hive-comb .cell.empty::before { background: #6e4312; }
+.hive-comb .cell.empty:hover { transform: scale(1.05); }
+.hive-comb .cell.brewing::before { background: #6e4312; }
+.hive-comb .cell.ready { animation: hivepulse 1s ease-in-out infinite; }
+.hive-comb .cell.ready .lbl { font-size: 1.6rem; }
+.hive-comb .cell.locked { opacity: .45; }
+.hive-comb .cell.locked::before { background: #5a3a14; }
+@keyframes hivepulse { 50% { transform: scale(1.07); } }
+.hive-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.hive-btn {
+  font: 800 1rem "Rubik", sans-serif; padding: 12px 16px; border-radius: 14px; border: 3px solid #2b1d0e;
+  background: #ffb703; color: #2b1d0e; box-shadow: 0 4px 0 #2b1d0e; cursor: pointer;
+}
+.hive-btn.alt { background: #fffdf5; }
+.hive-btn:disabled { opacity: .5; cursor: default; }
+.hive-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 #2b1d0e; }
+.hive-msg { margin: 0; min-height: 1.3em; font-weight: 800; text-align: center; }
+.hive-msg.ok { color: #2f6a14; }
+.hive-msg.err { color: #a02a0a; }
+.hive-shop {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 9;
+  width: min(420px, calc(100% - 24px)); background: #fffdf5; border: 3px solid #2b1d0e; border-radius: 18px;
+  box-shadow: 0 6px 0 #2b1d0e; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.shop-item { display: flex; align-items: center; gap: 12px; padding: 10px; border: 3px solid #2b1d0e; border-radius: 14px; background: #fff4c7; }
+.shop-icon { font-size: 2rem; width: 44px; text-align: center; color: #b77a2c; }
+.shop-body { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: .85rem; }
+.shop-body b { font-size: 1rem; }
+.shop-dots { display: flex; gap: 4px; }
+.shop-dots i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #2b1d0e; background: #fff; }
+.shop-dots i.on { background: #ffb703; }
+.shop-item .hive-btn { font-size: .85rem; padding: 9px 10px; white-space: nowrap; }
 .world-help {
   position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
   padding: 6px 12px; border-radius: 12px; background: rgba(8,10,24,.6); color: #fff4d6; font-size: .8rem; text-align: center;

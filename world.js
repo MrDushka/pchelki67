@@ -1050,7 +1050,7 @@
   }
 
   // ---------- мини-игра сбора ----------
-  let mg = null, near = null, busy = false, sellBusy = false, sellRetry = 0, posBusy = false, posT = 0, lastSaved = null;
+  let wasInHive = false, mg = null, near = null, busy = false, sellBusy = false, sellRetry = 0, posBusy = false, posT = 0, lastSaved = null;
   let net = { sb: null, token: null }, user = null, onUser = null;
   const taken = new Map();
   const toasts = [];
@@ -1062,7 +1062,9 @@
   }
 
   function action() {
-    if (mg || !near || busy || !user) return;
+    if (mg || hiveOpen) return;
+    if (!near && net.sb && Math.hypot(player.x - HX, player.y - HY) < HIVE_R - 20) return openHive();
+    if (!near || busy || !user) return;
     if (user.pollen >= user.bag_cap) return toast("Мешочек полон! Лети в улей", "#ff9a6b");
     startCatch(near);
   }
@@ -1316,6 +1318,154 @@
   function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
   function setShown(el, on) { if (el.hidden === on) el.hidden = !on; }
 
+  // ---------- улей изнутри ----------
+  // Внутри улья соты. В соту заливается 10 пыльцы, через 20 секунд там банка мёда.
+  // Всё считает сервер (hive_state, comb_fill, comb_collect, upgrade_combs, upgrade_bag).
+  let hive = null, hiveOpen = false, hiveTimer = 0, hiveBusy = false, hiveWired = false;
+  const MAX_COMBS = 24;
+
+  function hiveMsg(text, ok) { const el = $id("hive-msg"); el.textContent = text || ""; el.className = "hive-msg " + (ok ? "ok" : "err"); }
+  function setHive(data) {
+    const now = Date.now();
+    hive = { ...data, combs: (data.combs || []).map((c) => ({ idx: c.idx, end: now + c.left * 1000 })) };
+    if (data.user) setUser(data.user);
+    renderHive();
+  }
+  async function hiveCall(fn, args, okText) {
+    if (!net.sb || hiveBusy) return;
+    hiveBusy = true;
+    const { data, error } = await net.sb.rpc(fn, { p_token: net.token, ...args });
+    hiveBusy = false;
+    if (error || !data) return hiveMsg(cleanErr(error));
+    if (fn === "upgrade_bag") { setUser(data); renderHive(); }
+    else setHive(data);
+    hiveMsg(typeof okText === "function" ? okText(data) : okText, true);
+  }
+
+  async function openHive() {
+    if (!net.sb || hiveOpen) return;
+    mg = null; keys.clear(); onUp();
+    await savePos(true);                 // сервер должен знать, что мы у улья
+    const { data, error } = await net.sb.rpc("hive_state", { p_token: net.token });
+    if (error || !data) return toast(cleanErr(error), "#ff9a6b");
+    hiveOpen = true;
+    setShown($id("hive-room"), true);
+    setShown($id("hive-shop"), false);
+    hiveMsg("");
+    setHive(data);
+    clearInterval(hiveTimer);
+    hiveTimer = setInterval(renderHiveTimers, 250);
+  }
+  function closeHive() {
+    if (!hiveOpen) return;
+    hiveOpen = false;
+    clearInterval(hiveTimer);
+    setShown($id("hive-room"), false);
+  }
+
+  // раскладка сот: шестиугольники рядами по 6, нечётные ряды сдвинуты
+  function combPos(i, w) {
+    const h = w * 1.1547, row = Math.floor(i / 6), col = i % 6;
+    return [col * w + (row % 2) * (w / 2), row * h * 0.78];
+  }
+  function renderHive() {
+    if (!hive || !user) return;
+    $id("hive-pollen").textContent = `🌼 ${user.pollen}/${user.bag_cap}`;
+    $id("hive-honey").textContent = `🍯 ${user.honey}`;
+    const box = $id("hive-comb");
+    const w = Math.max(44, Math.min(74, (Math.min(window.innerWidth, 560) - 40) / 6.6));
+    const rows = Math.ceil(MAX_COMBS / 6);
+    box.style.width = (w * 6.5) + "px";
+    box.style.height = (rows * w * 1.1547 * 0.78 + w * 0.3) + "px";
+    if (box.children.length !== MAX_COMBS) {
+      box.innerHTML = "";
+      for (let i = 0; i < MAX_COMBS; i++) {
+        const c = document.createElement("button");
+        c.className = "cell"; c.dataset.idx = i;
+        c.innerHTML = '<span class="fill"></span><span class="lbl"></span>';
+        box.appendChild(c);
+      }
+    }
+    [...box.children].forEach((c, i) => {
+      const [x, y] = combPos(i, w);
+      c.style.left = x + "px"; c.style.top = y + "px";
+      c.style.width = (w - 4) + "px"; c.style.height = (w * 1.1547 - 4) + "px";
+    });
+    renderHiveTimers();
+    // кнопки
+    const empty = hive.comb_count - hive.combs.length;
+    const canFill = Math.min(empty, Math.floor(user.pollen / 10));
+    $id("hive-fill").textContent = canFill > 0 ? `🌼 Залить пыльцу (${canFill} сот)` : "🌼 Залить пыльцу";
+    $id("hive-fill").disabled = canFill <= 0;
+    renderShop();
+  }
+  function renderHiveTimers() {
+    if (!hive) return;
+    const now = Date.now(), box = $id("hive-comb");
+    const byIdx = new Map(hive.combs.map((c) => [c.idx, c]));
+    let ready = 0;
+    [...box.children].forEach((c, i) => {
+      const comb = byIdx.get(i);
+      let cls = "cell", lbl = "", fill = 0;
+      if (i >= hive.comb_count) { cls += " locked"; lbl = "🔒"; }
+      else if (!comb) { cls += " empty"; lbl = user && user.pollen >= 10 ? "+" : ""; }
+      else {
+        const left = (comb.end - now) / 1000;
+        if (left <= 0) { cls += " ready"; lbl = "🍯"; fill = 1; ready++; }
+        else { cls += " brewing"; lbl = Math.ceil(left) + "с"; fill = 1 - left / hive.brew; }
+      }
+      if (c.className !== cls) c.className = cls;
+      const l = c.lastChild; if (l.textContent !== lbl) l.textContent = lbl;
+      c.firstChild.style.height = Math.round(fill * 100) + "%";
+    });
+    const col = $id("hive-collect");
+    col.textContent = ready ? `🍯 Собрать мёд (${ready})` : "🍯 Собрать мёд";
+    col.disabled = !ready;
+  }
+
+  function renderShop() {
+    if (!hive || !user) return;
+    const bagNext = BAG_CAPS[user.bag_level];      // следующий уровень (или undefined)
+    const bag = $id("shop-bag");
+    bag.querySelector(".shop-now").textContent = bagNext
+      ? `Уровень ${user.bag_level} · ${user.bag_cap} пыльцы → ${bagNext}` : `Уровень ${user.bag_level} · ${user.bag_cap} пыльцы · максимум`;
+    const bb = bag.querySelector("button");
+    bb.textContent = user.bag_cost == null ? "Максимум" : `Купить за ${user.bag_cost} 🍯`;
+    bb.disabled = user.bag_cost == null || user.honey < user.bag_cost;
+    bag.querySelector(".shop-dots").innerHTML = BAG_CAPS.map((_, i) => `<i class="${i < user.bag_level ? "on" : ""}"></i>`).join("");
+
+    const comb = $id("shop-comb");
+    comb.querySelector(".shop-now").textContent = hive.comb_next
+      ? `Уровень ${hive.comb_level} · ${hive.comb_count} сот → ${hive.comb_next}` : `Уровень ${hive.comb_level} · ${hive.comb_count} сот · максимум`;
+    const cb = comb.querySelector("button");
+    cb.textContent = hive.comb_cost == null ? "Максимум" : `Купить за ${hive.comb_cost} 🍯`;
+    cb.disabled = hive.comb_cost == null || user.honey < hive.comb_cost;
+    comb.querySelector(".shop-dots").innerHTML = [1, 2, 3, 4].map((l) => `<i class="${l <= hive.comb_level ? "on" : ""}"></i>`).join("");
+  }
+
+  function wireHive() {
+    if (hiveWired) return;
+    hiveWired = true;
+    $id("hive-exit").addEventListener("click", closeHive);
+    $id("hive-fill").addEventListener("click", () => hiveCall("comb_fill", { p_idx: null }, "Пыльца в сотах, мёд зреет…"));
+    $id("hive-collect").addEventListener("click", () => hiveCall("comb_collect", { p_idx: null }, (d) => `+${d.got} 🍯 мёда!`));
+    $id("hive-comb").addEventListener("click", (e) => {
+      const c = e.target.closest(".cell"); if (!c) return;
+      const i = +c.dataset.idx;
+      if (c.classList.contains("empty")) hiveCall("comb_fill", { p_idx: i }, "Пыльца в соте, мёд зреет…");
+      else if (c.classList.contains("ready")) hiveCall("comb_collect", { p_idx: i }, "+1 🍯 мёда!");
+      else if (c.classList.contains("locked")) { setShown($id("hive-shop"), true); hiveMsg("Больше сот — в магазине", true); }
+    });
+    $id("hive-shop-btn").addEventListener("click", () => setShown($id("hive-shop"), $id("hive-shop").hidden));
+    $id("hive-shop-close").addEventListener("click", () => setShown($id("hive-shop"), false));
+    $id("shop-bag").querySelector("button").addEventListener("click", () =>
+      hiveCall("upgrade_bag", {}, (u) => `Мешочек теперь ${u.bag_cap} пыльцы!`));
+    $id("shop-comb").querySelector("button").addEventListener("click", () =>
+      hiveCall("upgrade_combs", {}, (d) => `Теперь у тебя ${d.comb_count} сот!`));
+    $id("hive-room").addEventListener("keydown", (e) => { if (e.key === "Escape") closeHive(); });
+    window.addEventListener("resize", () => { if (hiveOpen) renderHive(); });
+  }
+
   // ---------- админ-панель ----------
   // Кнопка видна только админам. Все действия проверяет сервер (admin_give, admin_teleport, admin_where).
   let adminWired = false;
@@ -1499,7 +1649,7 @@
     if (keys.has("w") || keys.has("arrowup") || keys.has("ц")) ay -= 1;
     if (keys.has("s") || keys.has("arrowdown") || keys.has("ы")) ay += 1;
     if (stick.on) { ax += stick.dx; ay += stick.dy; }
-    if (mg) { ax = 0; ay = 0; }
+    if (mg || hiveOpen) { ax = 0; ay = 0; }
     const len = Math.hypot(ax, ay);
     if (len > 1) { ax /= len; ay /= len; }
     const speed = keys.has("shift") ? 620 : 340;
@@ -1578,9 +1728,10 @@
     drawAnimals(camX, camY, t, dt);
     if (hiveOn) drawHive(hsx, hsy, t);
 
-    // в улье пыльца сама превращается в мёд
+    // у улья: можно зайти внутрь и сделать мёд в сотах
     const inHive = Math.hypot(player.x - HX, player.y - HY) < HIVE_R - 20;
-    if (inHive && net.sb && user && user.pollen >= 10 && !sellBusy && now > sellRetry) sell();
+    if (inHive && !wasInHive && user && user.pollen >= 10) toast("Зайди в улей и залей пыльцу в соты", "#ffd23f");
+    wasInHive = inHive;
 
     // другие пчёлки
     netTick(t, dt);
@@ -1648,9 +1799,8 @@
     setText(tpb, tpLeft > 0 ? `🏠 В улей (${tpLeft})` : "🏠 В улей");
     tpb.disabled = tpLeft > 0 || !net.sb;
     const up = $id("world-upgrade");
-    setShown(up, inHive && !!user && !mg);
-    if (inHive && user) setText(up, user.bag_cost == null ? "Мешочек максимальный 🎒"
-      : `⬆ Мешочек ${user.bag_cap} → ${BAG_CAPS[user.bag_level]} за ${user.bag_cost} 🍯`);
+    setShown(up, inHive && !!user && !!net.sb && !mg && !hiveOpen);
+    setText(up, "🚪 Войти в улей (E)");
     if (t - posT > 2) { posT = t; savePos(false); }
     document.getElementById("world-online").textContent = `🐝 в игре: ${online}`;
 
@@ -1661,6 +1811,7 @@
   // ---------- управление ----------
   function onKey(e) {
     if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+    if (hiveOpen) { if (e.type === "keydown" && e.key === "Escape") closeHive(); return; }
     const k = e.key.toLowerCase();
     if (e.type === "keydown") { keys.add(k); if (k.startsWith("arrow") || k === " ") e.preventDefault(); }
     else keys.delete(k);
@@ -1683,7 +1834,7 @@
   }
   function onUp() { stick.on = false; stick.dx = stick.dy = 0; mgDown = false; }
   function onAct(e) { e.preventDefault(); if (mg) mg = null; else action(); }
-  function onUpg(e) { e.preventDefault(); upgrade(); }
+  function onUpg(e) { e.preventDefault(); openHive(); }
   function onTp(e) { e.preventDefault(); teleportHome(); }
 
   function start(opts = {}) {
@@ -1713,6 +1864,7 @@
     $id("world-upgrade").addEventListener("pointerdown", onUpg);
     $id("world-tp").addEventListener("pointerdown", onTp);
     wireAdmin();
+    wireHive();
     setShown($id("admin-btn"), !!(user && user.is_admin && net.sb));
     openAdmin(false);
     running = true; lastT = 0;
@@ -1731,6 +1883,7 @@
     $id("world-upgrade").removeEventListener("pointerdown", onUpg);
     $id("world-tp").removeEventListener("pointerdown", onTp);
     openAdmin(false);
+    closeHive();
     netStop();
     keys.clear(); onUp();
     window.removeEventListener("resize", resize);
