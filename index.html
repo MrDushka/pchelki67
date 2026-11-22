@@ -93,22 +93,11 @@
       <p class="admin-msg" id="admin-msg" role="status"></p>
     </div>
     <button class="world-upgrade" id="world-upgrade" tabindex="-1" hidden></button>
-    <div class="hive-room" id="hive-room" hidden>
-      <div class="hive-inner">
-        <div class="hive-top">
-          <button class="world-back" id="hive-exit">← Выйти</button>
-          <b class="hive-title">🏠 Улей</b>
-          <div class="hive-stats"><span id="hive-pollen"></span><span id="hive-honey"></span></div>
-        </div>
-        <p class="hive-tip">Залей 10 пыльцы в соту — через 20 секунд там будет банка мёда</p>
-        <div class="hive-comb" id="hive-comb"></div>
-        <div class="hive-actions">
-          <button class="hive-btn" id="hive-fill">🌼 Залить пыльцу</button>
-          <button class="hive-btn" id="hive-collect">🍯 Собрать мёд</button>
-          <button class="hive-btn alt" id="hive-shop-btn">🛒 Магазин</button>
-        </div>
-        <p class="hive-msg" id="hive-msg" role="status"></p>
-      </div>
+    <div class="hive-bar" id="hive-bar" hidden>
+      <button class="hive-btn" id="hive-fill">🌼 Залить пыльцу</button>
+      <button class="hive-btn" id="hive-collect">🍯 Собрать мёд</button>
+    </div>
+    <div>
       <div class="hive-shop" id="hive-shop" hidden>
         <div class="admin-head"><b>🛒 Магазин улья</b><button class="admin-x" id="hive-shop-close" aria-label="Закрыть">✕</button></div>
         <div class="shop-item" id="shop-bag">
