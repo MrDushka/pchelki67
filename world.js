@@ -1066,7 +1066,7 @@
     if (!near && net.sb && Math.hypot(player.x - HX, player.y - HY) < HIVE_R - 20) return openHive();
     if (!near || busy || !user) return;
     if (user.pollen >= user.bag_cap) return toast("Мешочек полон! Лети в улей", "#ff9a6b");
-    startCatch(near);
+    startSip(near);
   }
   async function collect(f) {
     if (!net.sb) return;
@@ -1132,84 +1132,62 @@
     else if (running) { player.x = data.x; player.y = data.y; player.vx = player.vy = 0; lastSaved = { x: data.x, y: data.y }; }
   }
 
-  // Мини-игра «Поймай пыльцу». В окошке появляются пылинки, их надо поймать, пока не исчезли.
-  // Мышкой или пальцем: жми, куда лететь маленькой пчёлке. На клавиатуре: веди пчёлку WASD/стрелками.
-  // Осы летят к пчёлке: коснёшься осы — цветок закроется. Чем реже цветок, тем больше пыльцы ловить и тем больше ос.
   let mgDown = false;
-  function startCatch(f) {
-    mg = { f, need: 6 + f.tier, got: 0, time: 0, dur: 9 + f.tier, spawnT: 0.2, items: [], pops: [], bx: 0.5, by: 0.55, tx: null, ty: null, face: 1 };
+  // Мини-игра «Высоси нектар». Держишь кнопку — пчёлка пьёт, нектар в колбе поднимается.
+  // Отпусти, когда уровень в зелёной зоне. Перебрал или отпустил рано — цветок закрывается.
+  // Чем реже цветок, тем уже зона, тем быстрее и рывками растёт нектар, а зона ещё и плавает.
+  const SIP_NEED = [3, 3, 4, 4, 5];
+  function startSip(f) {
+    const tier = f.tier;
+    mg = {
+      f, tier, need: SIP_NEED[tier], got: 0, level: 0, hold: false, armed: false, time: 0,
+      zw: 0.22 - tier * 0.03, zc: 0, flash: 0, flashOk: true, bubbles: [],
+    };
+    newZone();
+  }
+  function newZone() { mg.zc0 = 0.45 + Math.random() * 0.35; mg.zc = mg.zc0; mg.level = 0; }
+  function zoneNow() {
+    const lo = mg.zc - mg.zw / 2, hi = mg.zc + mg.zw / 2;
+    return [Math.max(0.1, lo), Math.min(0.97, hi)];
+  }
+  function sipFail(text) { taken.set(mg.f.key, Date.now() + 8000); toast(text, "#ff9a6b", mg.f); mg = null; }
+  function sipHold() { if (mg && mg.armed) mg.hold = true; }
+  function sipRelease() {
+    if (!mg) return;
+    if (!mg.armed) { mg.armed = true; return; }      // первое отпускание — после нажатия, которым открыли игру
+    if (!mg.hold) return;
+    mg.hold = false;
+    if (mg.level < 0.04) return;                      // случайный тык — не считаем
+    const [lo, hi] = zoneNow();
+    if (mg.level < lo) return sipFail("Мало нектара! Цветок закрылся");
+    if (mg.level > hi) return sipFail("Перебрал! Цветок закрылся");
+    mg.got++; mg.flash = performance.now(); mg.flashOk = true;
+    if (mg.got >= mg.need) { const f = mg.f; mg = null; collect(f); return; }
+    newZone();
+  }
+  function updateSip(dt) {
+    const tier = mg.tier;
+    mg.time += dt;
+    if (tier >= 2) mg.zc = mg.zc0 + Math.sin(mg.time * (0.9 + tier * 0.15)) * 0.05 * (tier - 1);
+    if (mg.hold) {
+      // рывки: скорость то быстрее, то медленнее
+      const jerk = 1 + Math.sin(mg.time * (7 + tier * 2)) * tier * 0.22;
+      mg.level += (0.5 + tier * 0.07) * Math.max(0.25, jerk) * dt;
+      if (Math.random() < dt * 14) mg.bubbles.push({ x: Math.random(), y: 0, s: 2 + Math.random() * 3 });
+      if (mg.level >= 1) { mg.level = 1; return sipFail("Перебрал! Цветок закрылся"); }
+    }
+    for (let i = mg.bubbles.length - 1; i >= 0; i--) {
+      const b = mg.bubbles[i]; b.y += dt * 0.9;
+      if (b.y > mg.level) mg.bubbles.splice(i, 1);
+    }
   }
   function mgRect() {
-    const w = Math.min(400, W - 24), h = Math.min(300, Math.max(220, H - 230));
-    return { x: (W - w) / 2, y: H - h - 108, w, h };
+    const w = Math.min(340, W - 24), h = 270;
+    return { x: (W - w) / 2, y: Math.max(70, H - h - 108), w, h };
   }
-  function arena(r) { return { x: r.x + 14, y: r.y + 54, w: r.w - 28, h: r.h - 54 - 30 }; }
-  function mgFail(text) { taken.set(mg.f.key, Date.now() + 8000); toast(text, "#ff9a6b", mg.f); mg = null; }
-  function catchItem(i) {
-    const it = mg.items[i];
-    mg.items.splice(i, 1);
-    mg.got++;
-    mg.pops.push({ x: it.x, y: it.y, age: 0 });
-    if (mg.got >= mg.need) { const f = mg.f; mg = null; collect(f); }
-  }
-  function updateCatch(dt) {
-    const tier = mg.f.tier, A = arena(mgRect());
-    mg.time += dt;
-    if (mg.time > mg.dur) return mgFail("Не успел! Цветок закрылся");
-    // маленькая пчёлка
-    let kx = 0, ky = 0;
-    if (keys.has("a") || keys.has("arrowleft") || keys.has("ф")) kx -= 1;
-    if (keys.has("d") || keys.has("arrowright") || keys.has("в")) kx += 1;
-    if (keys.has("w") || keys.has("arrowup") || keys.has("ц")) ky -= 1;
-    if (keys.has("s") || keys.has("arrowdown") || keys.has("ы")) ky += 1;
-    if (kx || ky) {
-      mg.tx = null;
-      const l = Math.hypot(kx, ky), sp = 360 * dt;
-      mg.bx += (kx / l) * sp / A.w; mg.by += (ky / l) * sp / A.h;
-      if (kx) mg.face = kx > 0 ? 1 : -1;
-    } else if (mg.tx != null) {
-      const dx = (mg.tx - mg.bx) * A.w, dy = (mg.ty - mg.by) * A.h, d = Math.hypot(dx, dy), step = 620 * dt;
-      if (Math.abs(dx) > 2) mg.face = dx > 0 ? 1 : -1;
-      if (d <= step) { mg.bx = mg.tx; mg.by = mg.ty; mg.tx = null; }
-      else { mg.bx += (dx / d) * step / A.w; mg.by += (dy / d) * step / A.h; }
-    }
-    mg.bx = Math.max(0.04, Math.min(0.96, mg.bx)); mg.by = Math.max(0.06, Math.min(0.94, mg.by));
-    // новые пылинки и осы
-    mg.spawnT -= dt;
-    if (mg.spawnT <= 0 && mg.items.length < 5) {
-      mg.spawnT = 0.42 - tier * 0.03;
-      const wasps = mg.items.filter((i) => i.wasp).length;
-      const wasp = wasps < (tier >= 3 ? 2 : 1) && Math.random() < 0.2 + tier * 0.05;
-      let x, y, tries = 0;
-      do { x = 0.08 + Math.random() * 0.84; y = 0.1 + Math.random() * 0.8; }
-      while (++tries < 8 && Math.hypot((x - mg.bx) * A.w, (y - mg.by) * A.h) < (wasp ? 120 : 50));
-      const sp = 0.25 + tier * 0.07;
-      mg.items.push({ x, y, age: 0, life: wasp ? 3.2 : Math.max(1.0, 1.6 - tier * 0.12), wasp, vx: (Math.random() - 0.5) * sp, vy: (Math.random() - 0.5) * sp, ph: Math.random() * 6 });
-    }
-    for (let i = mg.items.length - 1; i >= 0; i--) {
-      const it = mg.items[i];
-      it.age += dt;
-      if (it.wasp) {            // оса медленно летит к пчёлке
-        const dx = (mg.bx - it.x) * A.w, dy = (mg.by - it.y) * A.h, d = Math.hypot(dx, dy) || 1, v = (70 + tier * 7) * dt;
-        it.x += (dx / d) * v / A.w; it.y += (dy / d) * v / A.h;
-      } else {
-        it.x += it.vx * dt; it.y += it.vy * dt;
-        if (it.x < 0.05 || it.x > 0.95) it.vx *= -1;
-        if (it.y < 0.08 || it.y > 0.92) it.vy *= -1;
-      }
-      if (it.age > it.life) { mg.items.splice(i, 1); continue; }
-      const d = Math.hypot((it.x - mg.bx) * A.w, (it.y - mg.by) * A.h);
-      if (it.wasp && d < 20) return mgFail("Ой! Ужалила оса");
-      if (!it.wasp && d < 21) { catchItem(i); if (!mg) return; }
-    }
-    for (let i = mg.pops.length - 1; i >= 0; i--) { mg.pops[i].age += dt; if (mg.pops[i].age > 0.5) mg.pops.splice(i, 1); }
-  }
-  function mgPointer(e) {
-    const A = arena(mgRect());
-    const u = (e.clientX - A.x) / A.w, v = (e.clientY - A.y) / A.h;
-    if (u < -0.05 || v < -0.05 || u > 1.05 || v > 1.05) return;
-    // пчёлка летит туда, куда нажал; ловит только своим телом
-    mg.tx = Math.max(0, Math.min(1, u)); mg.ty = Math.max(0, Math.min(1, v));
+  function closeBtnHit(e) {
+    const R = mgRect();
+    return Math.hypot(e.clientX - (R.x + R.w - 22), e.clientY - (R.y + 22)) < 18;
   }
 
   function drawMiniBee(x, y, s, face, t) {
@@ -1223,69 +1201,63 @@
     ctx.fillStyle = "#2b1d0e"; ctx.beginPath(); ctx.arc(6, -2, 1.6, 0, 6.283); ctx.fill();
     ctx.restore();
   }
-  function drawWasp(x, y, t) {
-    ctx.save(); ctx.translate(x, y + Math.sin(t * 9) * 2);
-    const fl = Math.abs(Math.sin(t * 45));
-    ctx.fillStyle = "rgba(230,240,255,0.85)";
-    ctx.beginPath(); ctx.ellipse(-3, -9, 5, 8 * (0.5 + fl * 0.5), -0.4, 0, 6.283); ctx.ellipse(3, -9, 5, 8 * (0.5 + fl * 0.5), 0.4, 0, 6.283); ctx.fill();
-    ctx.fillStyle = "#ffd21f"; ctx.beginPath(); ctx.ellipse(0, 0, 12, 6, 0, 0, 6.283); ctx.fill();
-    ctx.save(); ctx.clip(); ctx.fillStyle = "#1a1208"; for (const sx of [-7, -2, 3]) ctx.fillRect(sx, -6, 2.6, 12); ctx.restore();
-    ctx.strokeStyle = "#c2382f"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, 12, 6, 0, 0, 6.283); ctx.stroke();
-    ctx.fillStyle = "#1a1208"; ctx.beginPath(); ctx.moveTo(-12, -1.5); ctx.lineTo(-18, 0); ctx.lineTo(-12, 1.5); ctx.fill();
-    ctx.fillStyle = "#e8262a"; ctx.beginPath(); ctx.arc(8, -2, 2, 0, 6.283); ctx.fill();
-    ctx.restore();
-  }
-
   function drawMinigame(t) {
-    const R = mgRect(), A = arena(R), f = mg.f, glow = TIER_GLOW[f.tier];
+    const R = mgRect(), f = mg.f, glow = TIER_GLOW[f.tier];
     ctx.fillStyle = "rgba(255,253,245,0.97)"; ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.roundRect(R.x, R.y, R.w, R.h, 18); ctx.fill(); ctx.stroke();
+    // заголовок и крестик
     ctx.fillStyle = "#2b1d0e"; ctx.font = "800 15px Rubik, sans-serif"; ctx.textAlign = "left";
-    ctx.fillText("Поймай пыльцу · " + TIER_NAMES[f.tier] + (f.tier ? ` ×${TIER_MULT[f.tier]}` : ""), R.x + 16, R.y + 25);
-    ctx.textAlign = "right"; ctx.font = "800 16px Rubik, sans-serif";
-    ctx.fillText(`${mg.got}/${mg.need}`, R.x + R.w - 16, R.y + 25);
-    // таймер
-    const left = Math.max(0, 1 - mg.time / mg.dur);
-    ctx.fillStyle = "#efe3c2"; ctx.beginPath(); ctx.roundRect(R.x + 14, R.y + 34, R.w - 28, 9, 5); ctx.fill();
-    ctx.fillStyle = left > 0.5 ? "#7bd36b" : left > 0.25 ? "#ffb703" : "#ff6a4a";
-    ctx.beginPath(); ctx.roundRect(R.x + 14, R.y + 34, (R.w - 28) * left, 9, 5); ctx.fill();
-    // поляна
-    ctx.save();
-    ctx.beginPath(); ctx.roundRect(A.x, A.y, A.w, A.h, 12); ctx.clip();
-    const bg = ctx.createLinearGradient(0, A.y, 0, A.y + A.h); bg.addColorStop(0, "#e9f8d4"); bg.addColorStop(1, "#cdeeb0");
-    ctx.fillStyle = bg; ctx.fillRect(A.x, A.y, A.w, A.h);
-    for (let i = 0; i < 14; i++) {
-      const x = A.x + hash(i, 1, 201) * A.w, y = A.y + hash(i, 2, 202) * A.h;
-      ctx.fillStyle = FLOWER_COLORS[i % FLOWER_COLORS.length]; ctx.globalAlpha = 0.45;
-      ctx.beginPath(); ctx.arc(x, y, 3, 0, 6.283); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    for (const it of mg.items) {
-      const x = A.x + it.x * A.w, y = A.y + it.y * A.h;
-      const fade = Math.min(1, (it.life - it.age) / 0.45), grow = Math.min(1, it.age / 0.15);
-      ctx.globalAlpha = Math.max(0, fade);
-      if (it.wasp) { drawWasp(x, y, t + it.ph); ctx.globalAlpha = 1; continue; }
-      const r = 10.5 * grow * (1 + Math.sin(t * 8 + it.ph) * 0.08);
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.6); g.addColorStop(0, `rgba(${glow},0.7)`); g.addColorStop(1, `rgba(${glow},0)`);
-      ctx.fillStyle = g; ctx.fillRect(x - r * 2.6, y - r * 2.6, r * 5.2, r * 5.2);
-      ctx.fillStyle = f.tier ? `rgb(${glow})` : "#ffcf3a";
-      for (let k = 0; k < 8; k++) { const a = k * 0.785 + t * 2; ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * 0.75, y + Math.sin(a) * r * 0.75, r * 0.45, 0, 6.283); ctx.fill(); }
-      ctx.fillStyle = "#fff6c8"; ctx.beginPath(); ctx.arc(x, y, r * 0.55, 0, 6.283); ctx.fill();
-      ctx.strokeStyle = "rgba(120,80,10,0.55)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, r * 1.15, 0, 6.283); ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    for (const p of mg.pops) {
-      const x = A.x + p.x * A.w, y = A.y + p.y * A.h, k = p.age / 0.5;
-      ctx.strokeStyle = `rgba(255,200,40,${1 - k})`; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(x, y, 8 + k * 22, 0, 6.283); ctx.stroke();
-      ctx.fillStyle = `rgba(90,60,10,${1 - k})`; ctx.font = "800 14px Rubik, sans-serif"; ctx.textAlign = "center";
-      ctx.fillText("+1", x, y - 14 - k * 16);
-    }
-    drawMiniBee(A.x + mg.bx * A.w, A.y + mg.by * A.h, 1.4, mg.face, t);
+    ctx.fillText("Высоси нектар · " + TIER_NAMES[f.tier] + (f.tier ? ` ×${TIER_MULT[f.tier]}` : ""), R.x + 16, R.y + 27);
+    ctx.font = "800 16px Rubik, sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "#7a6650";
+    ctx.fillText("✖", R.x + R.w - 22, R.y + 28);
+
+    // колба
+    const tw = 70, th = 170, tx = R.x + R.w / 2 - 50, ty = R.y + 44;
+    const [lo, hi] = zoneNow();
+    ctx.fillStyle = "#f3ecdc"; ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 22); ctx.fill();
+    // зелёная зона
+    const zy1 = ty + th * (1 - hi), zy0 = ty + th * (1 - lo);
+    ctx.fillStyle = "rgba(123,211,107,0.45)"; ctx.fillRect(tx, zy1, tw, zy0 - zy1);
+    // нектар
+    ctx.save(); ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 22); ctx.clip();
+    const ly = ty + th * (1 - mg.level);
+    const g = ctx.createLinearGradient(0, ly, 0, ty + th);
+    g.addColorStop(0, f.tier ? `rgb(${glow})` : "#ffd75e"); g.addColorStop(1, "#ff9f1a");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(tx, ty + th);
+    for (let i = 0; i <= 14; i++) { const x = tx + (i / 14) * tw; ctx.lineTo(x, ly + Math.sin(t * 8 + i) * (mg.hold ? 2.5 : 1)); }
+    ctx.lineTo(tx + tw, ty + th); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    for (const b of mg.bubbles) { ctx.beginPath(); ctx.arc(tx + 8 + b.x * (tw - 16), ty + th * (1 - b.y), b.s, 0, 6.283); ctx.fill(); }
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(tx + 9, ty + 10, 7, th - 20);
     ctx.restore();
-    ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(A.x, A.y, A.w, A.h, 12); ctx.stroke();
+    // рамка колбы и скобки зоны
+    ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 22); ctx.stroke();
+    ctx.strokeStyle = "#3f9a3a"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(tx - 10, zy1); ctx.lineTo(tx - 4, zy1); ctx.lineTo(tx - 4, zy0); ctx.lineTo(tx - 10, zy0);
+    ctx.moveTo(tx + tw + 10, zy1); ctx.lineTo(tx + tw + 4, zy1); ctx.lineTo(tx + tw + 4, zy0); ctx.lineTo(tx + tw + 10, zy0); ctx.stroke();
+    // вспышка после удачного глотка
+    const fl = performance.now() - mg.flash;
+    if (fl < 400) {
+      ctx.fillStyle = `rgba(123,211,107,${0.5 * (1 - fl / 400)})`; ctx.beginPath(); ctx.roundRect(tx - 6, ty - 6, tw + 12, th + 12, 26); ctx.fill();
+      ctx.fillStyle = "#2f6a14"; ctx.font = "800 18px Rubik, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("Глоток!", tx + tw / 2, ty - 6 - fl / 30);
+    }
+    // пчёлка с трубочкой
+    const bx = tx + tw + 62, by = ty + 40 + Math.sin(t * 3) * 3;
+    ctx.strokeStyle = "#c98a3a"; ctx.lineWidth = 4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(bx - 14, by + 4); ctx.quadraticCurveTo(tx + tw + 14, by + 10, tx + tw - 18, ty + th - 24); ctx.stroke();
+    drawMiniBee(bx, by, 2.1, -1, t);
+    if (mg.hold) { ctx.fillStyle = "#7a6650"; ctx.font = "800 14px Rubik, sans-serif"; ctx.textAlign = "center"; ctx.fillText("сёрб-сёрб…", bx, by - 30); }
+    // счётчик глотков
+    for (let i = 0; i < mg.need; i++) {
+      const cx = R.x + 28, cy = ty + 18 + i * 30;
+      ctx.fillStyle = i < mg.got ? "#ffb703" : "#e8dcc0"; ctx.beginPath(); ctx.arc(cx, cy, 10, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = "#2b1d0e"; ctx.lineWidth = 2; ctx.stroke();
+      if (i < mg.got) { ctx.fillStyle = "#2b1d0e"; ctx.font = "800 12px Rubik, sans-serif"; ctx.textAlign = "center"; ctx.fillText("✓", cx, cy + 4); }
+    }
     ctx.fillStyle = "#7a6650"; ctx.font = "600 12px Rubik, sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("Веди пчёлку к пыльце: жми мышкой/пальцем или WASD · не трогай ос!", W / 2, R.y + R.h - 10);
+    ctx.fillText(mg.armed ? "Держи ПРОБЕЛ / палец · отпусти в зелёной зоне" : "Отпусти кнопку, чтобы начать", W / 2, R.y + R.h - 14);
   }
 
   function drawHiveHud(t) {
@@ -1724,7 +1696,7 @@
         if (!empty && d < nearD) { nearD = d; near = f; }
       }
     }
-    if (mg) updateCatch(dt);
+    if (mg) updateSip(dt);
     drawAnimals(camX, camY, t, dt);
     if (hiveOn) drawHive(hsx, hsy, t);
 
@@ -1792,7 +1764,7 @@
     setText($id("world-pos"), `X ${Math.round(player.x - HX)} · Y ${Math.round(player.y - HY)}`);
     if (user) setText($id("world-bag"), `🎒 ${user.pollen}/${user.bag_cap} · 🍯 ${user.honey}`);
     const act = $id("world-act");
-    if (mg) { setShown(act, true); setText(act, "✖ Отмена"); }
+    if (mg) { setShown(act, true); setText(act, mg.hold ? "🍯 Пью…" : "🍯 Держи!"); }
     else if (near && user) { setShown(act, true); setText(act, user.pollen >= user.bag_cap ? "Мешочек полон 🏠" : `🌼 Собрать: ${TIER_NAMES[near.tier]}`); }
     else setShown(act, false);
     const tpb = $id("world-tp"), tpLeft = Math.ceil((tpReady - Date.now()) / 1000);
@@ -1815,25 +1787,30 @@
     const k = e.key.toLowerCase();
     if (e.type === "keydown") { keys.add(k); if (k.startsWith("arrow") || k === " ") e.preventDefault(); }
     else keys.delete(k);
+    const sipKey = k === " " || k === "e" || k === "у";
+    if (e.type === "keyup" && sipKey) sipRelease();
     if (e.type !== "keydown" || e.repeat) return;
-    if (k === " " || k === "e" || k === "у") action();
+    if (sipKey) { if (mg) sipHold(); else action(); }
     if (k === "h" || k === "р") teleportHome();
     if (k === "escape") { if (mg) mg = null; else if (!$id("admin-panel").hidden) openAdmin(false); else stop(); }
   }
   function onDown(e) {
-    if (mg) { mgDown = true; mgPointer(e); return; }
+    if (mg) {
+      if (closeBtnHit(e)) { mg = null; return; }
+      mgDown = true; sipHold(); canvas.setPointerCapture(e.pointerId); return;
+    }
     stick.on = true; stick.ox = e.clientX; stick.oy = e.clientY; stick.dx = stick.dy = 0;
     canvas.setPointerCapture(e.pointerId);
   }
   function onMove(e) {
-    if (mg && mgDown) return mgPointer(e);
     if (!stick.on) return;
     const dx = e.clientX - stick.ox, dy = e.clientY - stick.oy, l = Math.hypot(dx, dy);
     const k = l > 60 ? 60 / l : 1;
     stick.dx = (dx * k) / 60; stick.dy = (dy * k) / 60;
   }
-  function onUp() { stick.on = false; stick.dx = stick.dy = 0; mgDown = false; }
-  function onAct(e) { e.preventDefault(); if (mg) mg = null; else action(); }
+  function onUp() { stick.on = false; stick.dx = stick.dy = 0; if (mg && mgDown) sipRelease(); mgDown = false; }
+  function onAct(e) { e.preventDefault(); if (mg) { mgDown = true; sipHold(); } else action(); }
+  function onActUp(e) { e.preventDefault(); if (mg) sipRelease(); mgDown = false; }
   function onUpg(e) { e.preventDefault(); openHive(); }
   function onTp(e) { e.preventDefault(); teleportHome(); }
 
@@ -1861,6 +1838,7 @@
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
     $id("world-act").addEventListener("pointerdown", onAct);
+    for (const ev of ["pointerup", "pointercancel", "pointerleave"]) $id("world-act").addEventListener(ev, onActUp);
     $id("world-upgrade").addEventListener("pointerdown", onUpg);
     $id("world-tp").addEventListener("pointerdown", onTp);
     wireAdmin();
@@ -1880,6 +1858,7 @@
     if (user) setUser({ ...user, pos_x: Math.round(player.x), pos_y: Math.round(player.y) });
     mg = null;
     $id("world-act").removeEventListener("pointerdown", onAct);
+    for (const ev of ["pointerup", "pointercancel", "pointerleave"]) $id("world-act").removeEventListener(ev, onActUp);
     $id("world-upgrade").removeEventListener("pointerdown", onUpg);
     $id("world-tp").removeEventListener("pointerdown", onTp);
     openAdmin(false);
