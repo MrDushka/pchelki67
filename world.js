@@ -1138,16 +1138,16 @@
   // Мини-игра «Высоси нектар». Держишь кнопку — пчёлка пьёт, нектар в колбе поднимается.
   // Отпусти, когда уровень в зелёной зоне. Перебрал или отпустил рано — цветок закрывается.
   // Чем реже цветок, тем уже зона, тем быстрее и рывками растёт нектар, а зона ещё и плавает.
-  const SIP_NEED = [3, 3, 4, 4, 5];
+  const SIP_NEED = [2, 2, 2, 3, 3];
   function startSip(f) {
     const tier = f.tier;
     mg = {
       f, tier, need: SIP_NEED[tier], got: 0, level: 0, hold: false, armed: false, time: 0,
-      zw: 0.22 - tier * 0.03, zc: 0, flash: 0, flashOk: true, bubbles: [],
+      zw: 0.36 - tier * 0.04, zc: 0, flash: 0, flashOk: true, bubbles: [],
     };
     newZone();
   }
-  function newZone() { mg.zc0 = 0.45 + Math.random() * 0.35; mg.zc = mg.zc0; mg.level = 0; }
+  function newZone() { mg.zc0 = 0.4 + Math.random() * 0.35; mg.zc = mg.zc0; mg.level = 0; }
   function zoneNow() {
     const lo = mg.zc - mg.zw / 2, hi = mg.zc + mg.zw / 2;
     return [Math.max(0.1, lo), Math.min(0.97, hi)];
@@ -1170,11 +1170,11 @@
   function updateSip(dt) {
     const tier = mg.tier;
     mg.time += dt;
-    if (tier >= 2) mg.zc = mg.zc0 + Math.sin(mg.time * (0.9 + tier * 0.15)) * 0.05 * (tier - 1);
+    if (tier >= 2) mg.zc = mg.zc0 + Math.sin(mg.time * (0.7 + tier * 0.1)) * 0.025 * (tier - 1);
     if (mg.hold) {
       // рывки: скорость то быстрее, то медленнее
-      const jerk = 1 + Math.sin(mg.time * (7 + tier * 2)) * tier * 0.22;
-      mg.level += (0.5 + tier * 0.07) * Math.max(0.25, jerk) * dt;
+      const jerk = 1 + Math.sin(mg.time * (5 + tier)) * tier * 0.11;
+      mg.level += (0.35 + tier * 0.04) * Math.max(0.5, jerk) * dt;
       if (Math.random() < dt * 14) mg.bubbles.push({ x: Math.random(), y: 0, s: 2 + Math.random() * 3 });
       if (mg.level >= 1) { mg.level = 1; return sipFail("Перебрал! Цветок закрылся"); }
     }
